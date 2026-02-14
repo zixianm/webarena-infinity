@@ -16,3 +16,5 @@ wheels/
 results/
 gitlab-org-management/docs/
 linear/docs/
+shopify/docs/
+.notes.md

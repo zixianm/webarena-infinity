@@ -80,7 +80,7 @@ async def main():
     )
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument("--output-dir", default="./evaluation/results")
-    parser.add_argument("--web-app", default="gitlab-org-management")
+    parser.add_argument("--web-app", default="apps/gitlab-org-management")
     args = parser.parse_args()
 
     web_app_dir = str(Path(args.web_app).resolve())

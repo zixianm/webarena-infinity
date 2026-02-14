@@ -11,9 +11,17 @@
 
 services:
   gitlab:
-    build: ./gitlab-org-management
+    build: ./apps/gitlab-org-management
     ports:
-      - "8001-8100:8000"
+      - "8001-8050:8000"
+    deploy:
+      replicas: 4
+    restart: unless-stopped
+
+  linear:
+    build: ./apps/linear
+    ports:
+      - "8051-8100:8000"
     deploy:
       replicas: 4
     restart: unless-stopped

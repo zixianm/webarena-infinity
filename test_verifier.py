@@ -6,9 +6,9 @@ Usage:
     python3 test_verifier.py <app_dir> [task_id]
 
 Example:
-    python3 test_verifier.py gitlab-org-management
-    python3 test_verifier.py linear task_e1
-    python3 test_verifier.py ./gitlab-org-management task_m3 --port 9000
+    python3 test_verifier.py apps/gitlab-org-management
+    python3 test_verifier.py apps/linear task_e1
+    python3 test_verifier.py ./apps/gitlab-org-management task_m3 --port 9000
 
 If no task_id is given, lists all available tasks and prompts for selection.
 Each round: resets state → waits for you to perform the task in the browser → you press Enter → runs the verifier.
@@ -18,7 +18,6 @@ Type 'q' to quit or pick a different task.
 import argparse
 import importlib.util
 import json
-import sys
 import time
 from pathlib import Path
 
@@ -137,7 +136,7 @@ def main():
     )
     parser.add_argument(
         "app_dir",
-        help="Path to the web app directory (e.g. gitlab-org-management, linear)",
+        help="Path to the web app directory (e.g. apps/gitlab-org-management, apps/linear)",
     )
     parser.add_argument(
         "task_id", nargs="?", default=None, help="Task ID to test (e.g. task_e1)"

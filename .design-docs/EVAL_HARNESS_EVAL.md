@@ -41,7 +41,7 @@ For every tasks:
 
 For more detailed information about the evaluation flow and environment reset process, refer to:
 
-gitlab-org-management/HARNESS.md
+apps/gitlab-org-management/HARNESS.md
 
 ---
 

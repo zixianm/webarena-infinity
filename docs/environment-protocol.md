@@ -74,7 +74,7 @@ python server.py --port PORT   # Default: 8000
 
 ### ID Convention
 - `e` = easy, `m` = medium, `h` = hard
-- 8 tasks per difficulty level (24 total in gitlab-org-management)
+- 8 tasks per difficulty level (24 total in apps/gitlab-org-management)
 
 ## Verifier Script Pattern
 
@@ -113,7 +113,7 @@ The web app's JavaScript must:
 3. **Listen for SSE reset**: Connect to `/api/events`, on `reset` event → restore seed data + navigate home
 4. **State must be JSON-serializable**: No functions, DOM refs, or circular structures
 
-### Recommended JS Pattern (from gitlab-org-management)
+### Recommended JS Pattern (from apps/gitlab-org-management)
 
 ```javascript
 // After any state mutation:
@@ -152,4 +152,4 @@ CMD ["python", "server.py"]
 
 ## Reference Implementation
 
-`gitlab-org-management/` is the reference. When creating a new environment, model it after that directory structure and server.py implementation.
+`apps/gitlab-org-management/` is the reference. When creating a new environment, model it after that directory structure and server.py implementation.

@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
 # Launch the full pipeline: controller + env generators + agent testers.
-# Run from your local machine after vpc_and_sg.sh and seed_branches.sh.
+# Run from your local machine after vpc_and_sg.sh, build_env_ami_interactive.sh,
+# and seed_branches.sh.
 #
 # Prerequisites:
-#   source /tmp/mirror-mirror-infra.env   (from vpc_and_sg.sh)
-#   Set these env vars:
-#     ANTHROPIC_API_KEY    — for Claude Code (env generation)
+#   source /tmp/mirror-mirror-infra.env   (from vpc_and_sg.sh + build_env_ami_interactive.sh)
+#   Set these env vars (or source .env):
 #     GOOGLE_API_KEY       — for Gemini (agent evaluation)
 #     GITHUB_TOKEN         — for git push/pull on EC2 instances
-#     KEY_PAIR_NAME        — your EC2 key pair name (for SSH if needed)
+#     KEY_PAIR_NAME        — your EC2 key pair name
+#     ENV_AMI_ID           — custom AMI with Claude logged in (from build_env_ami_interactive.sh)
 #
 # Usage:
 #   bash infra/setup/launch_pipeline.sh              # N=5 default (1 gen + 1 tester)
@@ -19,16 +20,20 @@ set -euo pipefail
 
 TOTAL_ENVS="${1:-5}"
 REGION="${AWS_REGION:-us-east-1}"
-REPO_URL="https://github.com/shuyanzhou/mirror-mirror.git"
 
 # --- Validate required env vars ---
 for var in PRIV_SUBNET SG_ENV SG_AGENT SG_CTRL PUB_SUBNET \
            GENERATE_QUEUE_URL EVAL_QUEUE_URL EVAL_DONE_QUEUE_URL PIPELINE_DONE_QUEUE_URL \
-           ANTHROPIC_API_KEY GOOGLE_API_KEY GITHUB_TOKEN KEY_PAIR_NAME; do
+           GOOGLE_API_KEY GITHUB_TOKEN KEY_PAIR_NAME ENV_AMI_ID; do
   if [ -z "${!var:-}" ]; then
     echo "ERROR: $var is not set"
-    echo "Run: source /tmp/mirror-mirror-infra.env"
-    echo "And set: ANTHROPIC_API_KEY, GOOGLE_API_KEY, GITHUB_TOKEN, KEY_PAIR_NAME"
+    echo ""
+    echo "Run these first:"
+    echo "  source /tmp/mirror-mirror-infra.env"
+    echo "  set -a && source .env && set +a"
+    echo ""
+    echo "If ENV_AMI_ID is missing, build it first:"
+    echo "  bash infra/setup/build_env_ami_interactive.sh"
     exit 1
   fi
 done
@@ -41,40 +46,40 @@ NUM_TESTERS=$(( (NUM_GENERATORS + 1) / 2 ))
 
 echo "=== Pipeline Launch Plan ==="
 echo "  Environments:    $TOTAL_ENVS"
-echo "  Env generators:  $NUM_GENERATORS  (m5.xlarge)"
+echo "  Env generators:  $NUM_GENERATORS  (m5.xlarge, AMI: $ENV_AMI_ID)"
 echo "  Agent testers:   $NUM_TESTERS  (c5.4xlarge)"
 echo "  Controller:      1  (t3.medium)"
 echo "  Region:          $REGION"
 echo ""
 
-# --- Find latest Amazon Linux 2023 AMI ---
+# --- Find latest Amazon Linux 2023 AMI (for controller + agent testers) ---
 AL2023_AMI=$(aws ec2 describe-images \
   --owners amazon \
   --filters "Name=name,Values=al2023-ami-2023*-x86_64" "Name=state,Values=available" \
   --query 'Images | sort_by(@, &CreationDate) | [-1].ImageId' \
   --output text --region "$REGION")
-echo "  Base AMI: $AL2023_AMI"
+echo "  Base AMI (ctrl/agent): $AL2023_AMI"
+echo "  Env AMI (generators):  $ENV_AMI_ID"
 echo ""
 
 # --- IAM role for SQS access ---
-# Create instance profile if it doesn't exist
 ROLE_NAME="mirror-mirror-ec2"
-if ! aws iam get-role --role-name "$ROLE_NAME" --region "$REGION" 2>/dev/null; then
+if ! aws iam get-role --role-name "$ROLE_NAME" 2>/dev/null; then
   echo "Creating IAM role: $ROLE_NAME"
   aws iam create-role --role-name "$ROLE_NAME" \
     --assume-role-policy-document '{
       "Version": "2012-10-17",
       "Statement": [{"Effect": "Allow", "Principal": {"Service": "ec2.amazonaws.com"}, "Action": "sts:AssumeRole"}]
-    }' --region "$REGION" > /dev/null
+    }' > /dev/null
   aws iam attach-role-policy --role-name "$ROLE_NAME" \
-    --policy-arn arn:aws:iam::aws:policy/AmazonSQSFullAccess --region "$REGION"
-  aws iam create-instance-profile --instance-profile-name "$ROLE_NAME" --region "$REGION" > /dev/null
-  aws iam add-role-to-instance-profile --instance-profile-name "$ROLE_NAME" --role-name "$ROLE_NAME" --region "$REGION"
+    --policy-arn arn:aws:iam::aws:policy/AmazonSQSFullAccess
+  aws iam create-instance-profile --instance-profile-name "$ROLE_NAME" > /dev/null
+  aws iam add-role-to-instance-profile --instance-profile-name "$ROLE_NAME" --role-name "$ROLE_NAME"
   echo "  Waiting for IAM propagation..."
   sleep 10
 fi
 
-# --- Common user-data header ---
+# --- Common user-data header (for controller + agent testers only) ---
 read -r -d '' USERDATA_COMMON << 'COMMON_EOF' || true
 #!/bin/bash
 set -euo pipefail
@@ -90,7 +95,6 @@ dnf install -y git gcc gcc-c++ make openssl-devel bzip2-devel \
 
 # Python via uv
 su - ec2-user -c 'curl -LsSf https://astral.sh/uv/install.sh | sh'
-export PATH="/home/ec2-user/.local/bin:$PATH"
 su - ec2-user -c 'export PATH="$HOME/.local/bin:$PATH" && uv python install 3.12'
 
 # Node.js 20
@@ -100,25 +104,22 @@ dnf install -y nodejs
 # Git config
 su - ec2-user -c 'git config --global user.email "mirror-mirror-bot@example.com"'
 su - ec2-user -c 'git config --global user.name "mirror-mirror-bot"'
+
+mkdir -p /tmp/mirror-mirror-logs
 COMMON_EOF
 
-# --- Env Generator user-data ---
+# --- Env Generator user-data (uses pre-built AMI — just set env vars + start worker) ---
 gen_userdata() {
   cat <<EOF
-${USERDATA_COMMON}
+#!/bin/bash
+set -euo pipefail
+exec > /var/log/mirror-mirror-setup.log 2>&1
 
-# Claude Code CLI
-npm install -g @anthropic-ai/claude-code
-
-# Python deps
-su - ec2-user -c 'export PATH="\$HOME/.local/bin:\$PATH" && uv pip install --system requests python-dotenv boto3'
-
-# Clone repo
-su - ec2-user -c 'git clone https://${GITHUB_TOKEN}@github.com/shuyanzhou/mirror-mirror.git /home/ec2-user/mirror-mirror'
+# Update repo
+su - ec2-user -c 'cd /home/ec2-user/mirror-mirror && git pull'
 
 # Write env vars
 cat >> /home/ec2-user/.bashrc <<ENVVARS
-export ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY}"
 export GITHUB_TOKEN="${GITHUB_TOKEN}"
 export AWS_REGION="${REGION}"
 export GENERATE_QUEUE_URL="${GENERATE_QUEUE_URL}"
@@ -127,6 +128,8 @@ export EVAL_DONE_QUEUE_URL="${EVAL_DONE_QUEUE_URL}"
 export PIPELINE_DONE_QUEUE_URL="${PIPELINE_DONE_QUEUE_URL}"
 export TOTAL_ENVS="${TOTAL_ENVS}"
 ENVVARS
+
+mkdir -p /tmp/mirror-mirror-logs
 
 # Start env worker
 su - ec2-user -c 'cd /home/ec2-user/mirror-mirror && nohup python infra/env_worker.py > /tmp/mirror-mirror-logs/env-worker.log 2>&1 &'
@@ -155,7 +158,6 @@ su - ec2-user -c 'git clone https://${GITHUB_TOKEN}@github.com/shuyanzhou/mirror
 # Write env vars
 cat >> /home/ec2-user/.bashrc <<ENVVARS
 export GOOGLE_API_KEY="${GOOGLE_API_KEY}"
-export ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-}"
 export GITHUB_TOKEN="${GITHUB_TOKEN}"
 export AWS_REGION="${REGION}"
 export EVAL_QUEUE_URL="${EVAL_QUEUE_URL}"
@@ -209,10 +211,10 @@ echo "  Controller: $CTRL_ID"
 
 INSTANCE_IDS="$CTRL_ID"
 
-echo "=== Launching $NUM_GENERATORS Env Generator(s) ==="
+echo "=== Launching $NUM_GENERATORS Env Generator(s) (from custom AMI) ==="
 for i in $(seq 1 "$NUM_GENERATORS"); do
   GEN_ID=$(aws ec2 run-instances \
-    --image-id "$AL2023_AMI" \
+    --image-id "$ENV_AMI_ID" \
     --instance-type m5.xlarge \
     --key-name "$KEY_PAIR_NAME" \
     --subnet-id "$PRIV_SUBNET" \
@@ -257,8 +259,10 @@ echo ""
 echo "=== All instances launched ==="
 echo "Instance IDs saved to $LAUNCH_FILE"
 echo ""
-echo "Instances are installing dependencies (~5-10 min). Monitor:"
+echo "Env generators boot fast (~30s, custom AMI). Agent testers take ~5-10 min."
+echo ""
+echo "Monitor:"
 echo "  bash infra/setup/monitor_pipeline.sh"
 echo ""
-echo "To tear down everything when done:"
+echo "Tear down:"
 echo "  bash infra/setup/teardown.sh"

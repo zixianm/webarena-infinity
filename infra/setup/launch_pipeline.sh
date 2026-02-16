@@ -82,7 +82,7 @@ fi
 # --- Common user-data header (shared by all instance types) ---
 read -r -d '' USERDATA_COMMON << 'COMMON_EOF' || true
 #!/bin/bash
-set -euo pipefail
+set -uo pipefail   # no -e: don't abort on individual command failures
 exec > /var/log/mirror-mirror-setup.log 2>&1
 
 export HOME=/home/ec2-user
@@ -155,16 +155,7 @@ ${USERDATA_COMMON}
 dnf install -y alsa-lib atk at-spi2-atk cups-libs libdrm mesa-libgbm \
   pango libXcomposite libXdamage libXrandr libxkbcommon nss nspr
 
-# Python deps
-su - ec2-user -c 'export PATH="\$HOME/.local/bin:\$PATH" && VIRTUAL_ENV=\$HOME/venv uv pip install "browser-use>=0.11.9" requests python-dotenv boto3'
-
-# Playwright + Chromium
-su - ec2-user -c '\$HOME/venv/bin/python -m playwright install chromium && \$HOME/venv/bin/python -m playwright install-deps'
-
-# Clone repo
-su - ec2-user -c 'git clone https://${GITHUB_TOKEN}@github.com/shuyanzhou/mirror-mirror.git /home/ec2-user/mirror-mirror'
-
-# Write env vars
+# Write env vars first (so they're available even if later steps fail)
 cat >> /home/ec2-user/.bashrc <<ENVVARS
 export GOOGLE_API_KEY="${GOOGLE_API_KEY}"
 export GITHUB_TOKEN="${GITHUB_TOKEN}"
@@ -172,6 +163,16 @@ export AWS_REGION="${REGION}"
 export EVAL_QUEUE_URL="${EVAL_QUEUE_URL}"
 export EVAL_DONE_QUEUE_URL="${EVAL_DONE_QUEUE_URL}"
 ENVVARS
+
+# Python deps (playwright must be explicit — browser-use alone doesn't install the CLI)
+su - ec2-user -c 'export PATH="\$HOME/.local/bin:\$PATH" && VIRTUAL_ENV=\$HOME/venv uv pip install playwright "browser-use>=0.11.9" requests python-dotenv boto3'
+
+# Playwright + Chromium (install-deps needs sudo for system packages)
+su - ec2-user -c '\$HOME/venv/bin/python -m playwright install chromium'
+\$HOME/venv/bin/python -m playwright install-deps || dnf install -y alsa-lib nss nspr atk cups-libs mesa-libgbm pango libXcomposite libXdamage libXrandr
+
+# Clone repo
+su - ec2-user -c 'git clone https://${GITHUB_TOKEN}@github.com/shuyanzhou/mirror-mirror.git /home/ec2-user/mirror-mirror'
 
 # Start agent worker
 su - ec2-user -c 'cd /home/ec2-user/mirror-mirror && nohup python infra/agent_worker.py --workers 8 > /tmp/mirror-mirror-logs/agent-worker.log 2>&1 &'
@@ -184,19 +185,19 @@ controller_userdata() {
   cat <<EOF
 ${USERDATA_COMMON}
 
-# Python deps
-su - ec2-user -c 'export PATH="\$HOME/.local/bin:\$PATH" && VIRTUAL_ENV=\$HOME/venv uv pip install boto3'
-
-# Clone repo
-su - ec2-user -c 'git clone https://${GITHUB_TOKEN}@github.com/shuyanzhou/mirror-mirror.git /home/ec2-user/mirror-mirror'
-
-# Write env vars
+# Write env vars first
 cat >> /home/ec2-user/.bashrc <<ENVVARS
 export AWS_REGION="${REGION}"
 export GENERATE_QUEUE_URL="${GENERATE_QUEUE_URL}"
 export PIPELINE_DONE_QUEUE_URL="${PIPELINE_DONE_QUEUE_URL}"
 export TOTAL_ENVS="${TOTAL_ENVS}"
 ENVVARS
+
+# Python deps
+su - ec2-user -c 'export PATH="\$HOME/.local/bin:\$PATH" && VIRTUAL_ENV=\$HOME/venv uv pip install boto3'
+
+# Clone repo
+su - ec2-user -c 'git clone https://${GITHUB_TOKEN}@github.com/shuyanzhou/mirror-mirror.git /home/ec2-user/mirror-mirror'
 
 # Start orchestrator
 su - ec2-user -c 'cd /home/ec2-user/mirror-mirror && nohup python infra/orchestrator.py --manifest infra/env_manifest.jsonl > /tmp/mirror-mirror-logs/orchestrator.log 2>&1 &'

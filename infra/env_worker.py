@@ -42,7 +42,7 @@ from config import (
     SQS_VISIBILITY_TIMEOUT,
     WORKTREE_DIR,
 )
-from sqs_utils import delete_message, receive_message, send_message
+from sqs_utils import delete_message, receive_message, release_message, send_message
 
 # ---------------------------------------------------------------------------
 # Prompt templates (loaded from infra/prompts/*.md)
@@ -339,6 +339,8 @@ def wait_for_eval_done(env_id: str, iteration: int) -> dict | None:
         if body.get("env_id") == env_id and body.get("iteration") == iteration:
             delete_message(EVAL_DONE_QUEUE_URL, receipt)
             return body
+        # Not for this worker — release immediately so the right worker can grab it
+        release_message(EVAL_DONE_QUEUE_URL, receipt)
     log.error("[%s] Timed out waiting for eval-done iter %d", env_id, iteration)
     return None
 

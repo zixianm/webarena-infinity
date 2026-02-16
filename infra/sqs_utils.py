@@ -67,6 +67,21 @@ def delete_message(queue_url: str, receipt_handle: str) -> None:
     log.debug("deleted message from %s", queue_url.rsplit("/", 1)[-1])
 
 
+def release_message(queue_url: str, receipt_handle: str) -> None:
+    """Make a received message immediately visible again.
+
+    Use this when a worker receives a message that belongs to a different
+    worker — instead of letting it stay invisible for the full visibility
+    timeout, this releases it back to the queue instantly.
+    """
+    _sqs().change_message_visibility(
+        QueueUrl=queue_url,
+        ReceiptHandle=receipt_handle,
+        VisibilityTimeout=0,
+    )
+    log.debug("released message back to %s", queue_url.rsplit("/", 1)[-1])
+
+
 def get_queue_attributes(queue_url: str) -> dict[str, str]:
     """Return approximate message counts for monitoring."""
     resp = _sqs().get_queue_attributes(

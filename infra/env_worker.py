@@ -57,6 +57,7 @@ def load_prompt(name: str, **kwargs: str) -> str:
         template = f.read().strip()
     return template.format(**kwargs)
 
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [env-worker] %(message)s",
@@ -86,7 +87,12 @@ def git(*args: str, cwd: str = REPO_DIR) -> subprocess.CompletedProcess:
     cmd = ["git", *args]
     result = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True)
     if result.returncode != 0:
-        log.error("git %s failed (rc=%d): %s", " ".join(args), result.returncode, result.stderr.strip())
+        log.error(
+            "git %s failed (rc=%d): %s",
+            " ".join(args),
+            result.returncode,
+            result.stderr.strip(),
+        )
         result.check_returncode()
     return result
 
@@ -133,7 +139,8 @@ def commit_and_push(worktree_path: str, env_id: str, message: str) -> None:
     git("add", apps_dir, cwd=worktree_path)
     result = subprocess.run(
         ["git", "diff", "--cached", "--quiet"],
-        cwd=worktree_path, capture_output=True,
+        cwd=worktree_path,
+        capture_output=True,
     )
     if result.returncode == 0:
         log.info("[%s] No changes to commit", env_id)
@@ -145,6 +152,7 @@ def commit_and_push(worktree_path: str, env_id: str, message: str) -> None:
 # ---------------------------------------------------------------------------
 # Server management (port-range aware)
 # ---------------------------------------------------------------------------
+
 
 def start_servers(app_dir: str, worker_id: int) -> list[subprocess.Popen]:
     """Start SERVERS_PER_ENV servers on this worker's port range."""
@@ -178,8 +186,12 @@ def start_servers(app_dir: str, worker_id: int) -> list[subprocess.Popen]:
         else:
             log.warning("Server on :%d did not become ready in time", port)
 
-    log.info("Started %d servers on :%d-:%d",
-             SERVERS_PER_ENV, port_base, port_base + SERVERS_PER_ENV - 1)
+    log.info(
+        "Started %d servers on :%d-:%d",
+        SERVERS_PER_ENV,
+        port_base,
+        port_base + SERVERS_PER_ENV - 1,
+    )
     return procs
 
 
@@ -199,7 +211,10 @@ def stop_servers(procs: list[subprocess.Popen]) -> None:
 # Claude Code invocation
 # ---------------------------------------------------------------------------
 
-def run_claude_code(prompt: str, app_dir: str, timeout: int = 3600) -> subprocess.CompletedProcess:
+
+def run_claude_code(
+    prompt: str, app_dir: str, timeout: int = 3600
+) -> subprocess.CompletedProcess:
     cmd = [
         "claude",
         "--print",
@@ -207,7 +222,11 @@ def run_claude_code(prompt: str, app_dir: str, timeout: int = 3600) -> subproces
         prompt,
     ]
     return subprocess.run(
-        cmd, cwd=app_dir, capture_output=True, text=True, timeout=timeout,
+        cmd,
+        cwd=app_dir,
+        capture_output=True,
+        text=True,
+        timeout=timeout,
     )
 
 
@@ -242,7 +261,10 @@ def run_sanity_check(env_id: str, worktree_path: str) -> bool:
 
     result = subprocess.run(
         [sys.executable, sanity_script, "--workers", "4"],
-        cwd=app_dir, capture_output=True, text=True, timeout=300,
+        cwd=app_dir,
+        capture_output=True,
+        text=True,
+        timeout=300,
     )
     if result.returncode != 0:
         log.warning("[%s] Sanity check failed:\n%s", env_id, result.stdout[-1000:])
@@ -255,6 +277,7 @@ def run_sanity_check(env_id: str, worktree_path: str) -> bool:
 # ---------------------------------------------------------------------------
 # Audit
 # ---------------------------------------------------------------------------
+
 
 def run_audit(env_id: str, iteration: int, worktree_path: str) -> bool:
     app_dir = os.path.join(worktree_path, "apps", env_id)
@@ -290,8 +313,9 @@ def run_audit(env_id: str, iteration: int, worktree_path: str) -> bool:
         if not run_sanity_check(env_id, worktree_path):
             log.error("[%s] Sanity check failed after audit", env_id)
             return False
-        commit_and_push(worktree_path, env_id,
-                        f"Audit revision iteration {iteration} for {env_id}")
+        commit_and_push(
+            worktree_path, env_id, f"Audit revision iteration {iteration} for {env_id}"
+        )
     else:
         log.info("[%s] Audit: no changes needed", env_id)
 
@@ -301,6 +325,7 @@ def run_audit(env_id: str, iteration: int, worktree_path: str) -> bool:
 # ---------------------------------------------------------------------------
 # Wait for eval-done signal
 # ---------------------------------------------------------------------------
+
 
 def wait_for_eval_done(env_id: str, iteration: int) -> dict | None:
     deadline = time.time() + 7200
@@ -322,9 +347,11 @@ def wait_for_eval_done(env_id: str, iteration: int) -> dict | None:
 # Get private IP
 # ---------------------------------------------------------------------------
 
+
 def get_private_ip() -> str:
     try:
         import requests
+
         token_resp = requests.put(
             "http://169.254.169.254/latest/api/token",
             headers={"X-aws-ec2-metadata-token-ttl-seconds": "21600"},
@@ -344,8 +371,10 @@ def get_private_ip() -> str:
 # Process a single environment (full lifecycle)
 # ---------------------------------------------------------------------------
 
-def process_env(worker_id: int, env_id: str, docs_source: str,
-                start_iteration: int = 1) -> None:
+
+def process_env(
+    worker_id: int, env_id: str, docs_source: str, start_iteration: int = 1
+) -> None:
     """Run the full generate → eval → audit loop for one environment."""
     tag = f"[W{worker_id}:{env_id}]"
     log.info("%s Starting (source=%s, iter=%d)", tag, docs_source, start_iteration)
@@ -361,18 +390,28 @@ def process_env(worker_id: int, env_id: str, docs_source: str,
         if start_iteration == 1:
             if not generate_environment(env_id, docs_source, worktree_path):
                 log.error("%s Generation failed", tag)
-                send_message(PIPELINE_DONE_QUEUE_URL, {
-                    "env_id": env_id, "final_iteration": 0,
-                    "pass_rate": 0, "status": "generation_failed",
-                })
+                send_message(
+                    PIPELINE_DONE_QUEUE_URL,
+                    {
+                        "env_id": env_id,
+                        "final_iteration": 0,
+                        "pass_rate": 0,
+                        "status": "generation_failed",
+                    },
+                )
                 return
 
             if not run_sanity_check(env_id, worktree_path):
                 log.error("%s Sanity check failed", tag)
-                send_message(PIPELINE_DONE_QUEUE_URL, {
-                    "env_id": env_id, "final_iteration": 0,
-                    "pass_rate": 0, "status": "sanity_check_failed",
-                })
+                send_message(
+                    PIPELINE_DONE_QUEUE_URL,
+                    {
+                        "env_id": env_id,
+                        "final_iteration": 0,
+                        "pass_rate": 0,
+                        "status": "sanity_check_failed",
+                    },
+                )
                 return
 
             commit_and_push(worktree_path, env_id, f"Initial generation for {env_id}")
@@ -393,13 +432,16 @@ def process_env(worker_id: int, env_id: str, docs_source: str,
 
             try:
                 # Request eval
-                send_message(EVAL_QUEUE_URL, {
-                    "env_id": env_id,
-                    "iteration": iteration,
-                    "branch": f"{BRANCH_PREFIX}{env_id.removeprefix(BRANCH_PREFIX)}",
-                    "env_host": my_ip,
-                    "base_port": port_base,
-                })
+                send_message(
+                    EVAL_QUEUE_URL,
+                    {
+                        "env_id": env_id,
+                        "iteration": iteration,
+                        "branch": f"{BRANCH_PREFIX}{env_id.removeprefix(BRANCH_PREFIX)}",
+                        "env_host": my_ip,
+                        "base_port": port_base,
+                    },
+                )
 
                 # Wait for eval completion
                 eval_result = wait_for_eval_done(env_id, iteration)
@@ -425,10 +467,15 @@ def process_env(worker_id: int, env_id: str, docs_source: str,
                 run_audit(env_id, iteration, worktree_path)
 
         # Signal completion
-        send_message(PIPELINE_DONE_QUEUE_URL, {
-            "env_id": env_id, "final_iteration": iteration,
-            "pass_rate": pass_rate, "status": "complete",
-        })
+        send_message(
+            PIPELINE_DONE_QUEUE_URL,
+            {
+                "env_id": env_id,
+                "final_iteration": iteration,
+                "pass_rate": pass_rate,
+                "status": "complete",
+            },
+        )
         log.info("%s Complete (iter=%d, pass_rate=%.1f%%)", tag, iteration, pass_rate)
 
     finally:
@@ -439,12 +486,16 @@ def process_env(worker_id: int, env_id: str, docs_source: str,
 # Worker process: polls SQS and processes envs
 # ---------------------------------------------------------------------------
 
+
 def worker_loop(worker_id: int, dry_run: bool = False) -> None:
     """One worker process: polls SQS, processes envs sequentially."""
     tag = f"[W{worker_id}]"
-    log.info("%s Started (ports %d-%d)", tag,
-             BASE_PORT + worker_id * SERVERS_PER_ENV,
-             BASE_PORT + (worker_id + 1) * SERVERS_PER_ENV - 1)
+    log.info(
+        "%s Started (ports %d-%d)",
+        tag,
+        BASE_PORT + worker_id * SERVERS_PER_ENV,
+        BASE_PORT + (worker_id + 1) * SERVERS_PER_ENV - 1,
+    )
 
     while not _shutdown:
         result = receive_message(
@@ -478,10 +529,15 @@ def worker_loop(worker_id: int, dry_run: bool = False) -> None:
 # Main
 # ---------------------------------------------------------------------------
 
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Env generator worker daemon")
-    parser.add_argument("--parallel", type=int, default=PARALLEL_WORKERS,
-                        help="Number of parallel workers per instance (default: %(default)s)")
+    parser.add_argument(
+        "--parallel",
+        type=int,
+        default=PARALLEL_WORKERS,
+        help="Number of parallel workers per instance (default: %(default)s)",
+    )
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
@@ -499,9 +555,12 @@ def main() -> None:
             sys.exit(1)
 
     num_workers = args.parallel
-    log.info("Env worker starting %d parallel workers (pid=%d)", num_workers, os.getpid())
-    log.info("Port range: %d-%d", BASE_PORT,
-             BASE_PORT + num_workers * SERVERS_PER_ENV - 1)
+    log.info(
+        "Env worker starting %d parallel workers (pid=%d)", num_workers, os.getpid()
+    )
+    log.info(
+        "Port range: %d-%d", BASE_PORT, BASE_PORT + num_workers * SERVERS_PER_ENV - 1
+    )
 
     # Register signal handlers in main process
     signal.signal(signal.SIGTERM, _handle_signal)

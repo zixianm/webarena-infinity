@@ -129,6 +129,11 @@ def main() -> None:
         help="Skip seeding, only monitor completions",
     )
     parser.add_argument(
+        "--seed-only",
+        action="store_true",
+        help="Seed jobs to the generate queue and exit (no monitoring)",
+    )
+    parser.add_argument(
         "--total-envs",
         type=int,
         default=None,
@@ -136,10 +141,20 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    if not GENERATE_QUEUE_URL or not PIPELINE_DONE_QUEUE_URL:
-        log.error(
-            "Set GENERATE_QUEUE_URL and PIPELINE_DONE_QUEUE_URL env vars"
-        )
+    if not GENERATE_QUEUE_URL:
+        log.error("Set GENERATE_QUEUE_URL env var")
+        sys.exit(1)
+
+    if args.seed_only:
+        manifest = load_manifest(args.manifest)
+        if not manifest:
+            log.error("Manifest is empty: %s", args.manifest)
+            sys.exit(1)
+        seed_jobs(manifest)
+        return
+
+    if not PIPELINE_DONE_QUEUE_URL:
+        log.error("Set PIPELINE_DONE_QUEUE_URL env var")
         sys.exit(1)
 
     if not args.monitor_only:

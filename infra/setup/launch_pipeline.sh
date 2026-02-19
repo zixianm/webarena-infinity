@@ -20,10 +20,27 @@
 #   bash infra/setup/launch_pipeline.sh              # N=5 default (1 gen + 1 tester)
 #   bash infra/setup/launch_pipeline.sh 20           # N=20 (2 gen + 1 tester)
 #   bash infra/setup/launch_pipeline.sh 100          # N=100 (10 gen + 5 testers)
+#
+# Reuse existing env generators (skips launching new ones, pulls latest code):
+#   bash infra/setup/launch_pipeline.sh --reuse-generators i-abc123,i-def456
 
 set -euo pipefail
 
-TOTAL_ENVS="${1:-5}"
+# --- Parse arguments ---
+REUSE_GEN_IDS=""
+TOTAL_ENVS="5"
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --reuse-generators)
+      REUSE_GEN_IDS="$2"
+      shift 2
+      ;;
+    *)
+      TOTAL_ENVS="$1"
+      shift
+      ;;
+  esac
+done
 REGION="${AWS_REGION:-us-east-1}"
 
 # --- Validate required env vars ---
@@ -142,7 +159,7 @@ ENVVARS
 touch /home/ec2-user/.setup-complete
 echo "Setup complete. SSH in to run: claude login"
 echo "Then start the worker with:"
-echo "  cd ~/mirror-mirror && nohup python infra/env_worker.py > /tmp/mirror-mirror-logs/env-worker.log 2>&1 &"
+echo "  cd ~/mirror-mirror && nohup \\\$HOME/venv/bin/python infra/env_worker.py > /tmp/mirror-mirror-logs/env-worker.log 2>&1 &"
 EOF
 }
 
@@ -175,7 +192,7 @@ su - ec2-user -c '\$HOME/venv/bin/python -m playwright install chromium'
 su - ec2-user -c 'git clone https://${GITHUB_TOKEN}@github.com/shuyanzhou/mirror-mirror.git /home/ec2-user/mirror-mirror'
 
 # Start agent worker
-su - ec2-user -c 'cd /home/ec2-user/mirror-mirror && nohup python infra/agent_worker.py --workers 8 > /tmp/mirror-mirror-logs/agent-worker.log 2>&1 &'
+su - ec2-user -c 'cd /home/ec2-user/mirror-mirror && nohup \$HOME/venv/bin/python infra/agent_worker.py --workers 8 > /tmp/mirror-mirror-logs/agent-worker.log 2>&1 &'
 echo "Agent worker started"
 EOF
 }
@@ -199,9 +216,9 @@ su - ec2-user -c 'export PATH="\$HOME/.local/bin:\$PATH" && VIRTUAL_ENV=\$HOME/v
 # Clone repo
 su - ec2-user -c 'git clone https://${GITHUB_TOKEN}@github.com/shuyanzhou/mirror-mirror.git /home/ec2-user/mirror-mirror'
 
-# Start orchestrator
-su - ec2-user -c 'cd /home/ec2-user/mirror-mirror && nohup python infra/orchestrator.py --manifest infra/env_manifest.jsonl > /tmp/mirror-mirror-logs/orchestrator.log 2>&1 &'
-echo "Orchestrator started"
+# Start orchestrator in monitor-only mode (jobs are seeded later, after env generators are ready)
+su - ec2-user -c 'cd /home/ec2-user/mirror-mirror && nohup \$HOME/venv/bin/python infra/orchestrator.py --monitor-only --total-envs ${TOTAL_ENVS} > /tmp/mirror-mirror-logs/orchestrator.log 2>&1 &'
+echo "Orchestrator started (monitor-only)"
 EOF
 }
 
@@ -222,24 +239,63 @@ echo "  Controller: $CTRL_ID"
 INSTANCE_IDS="$CTRL_ID"
 
 # Env generators go in PUBLIC subnet (need SSH for claude login)
-echo "=== Launching $NUM_GENERATORS Env Generator(s) ==="
 GEN_IDS=""
-for i in $(seq 1 "$NUM_GENERATORS"); do
-  GEN_ID=$(aws ec2 run-instances \
-    --image-id "$AL2023_AMI" \
-    --instance-type m5.xlarge \
-    --key-name "$KEY_PAIR_NAME" \
-    --subnet-id "$PUB_SUBNET" \
-    --security-group-ids "$SG_ENV" "$SG_CTRL" \
-    --iam-instance-profile Name="$ROLE_NAME" \
-    --user-data "$(gen_userdata | base64)" \
-    --block-device-mappings '[{"DeviceName":"/dev/xvda","Ebs":{"VolumeSize":30}}]' \
-    --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=mm-env-gen-$i},{Key=Project,Value=mirror-mirror},{Key=Role,Value=env-generator}]" \
-    --query 'Instances[0].InstanceId' --output text --region "$REGION")
-  echo "  Env Generator $i: $GEN_ID"
-  INSTANCE_IDS="$INSTANCE_IDS $GEN_ID"
-  GEN_IDS="$GEN_IDS $GEN_ID"
-done
+if [ -n "$REUSE_GEN_IDS" ]; then
+  echo "=== Reusing existing Env Generator(s) ==="
+  for gen_id in ${REUSE_GEN_IDS//,/ }; do
+    STATE=$(aws ec2 describe-instances --instance-ids "$gen_id" \
+      --query 'Reservations[0].Instances[0].State.Name' --output text --region "$REGION" 2>/dev/null || echo "not-found")
+    if [ "$STATE" = "running" ]; then
+      echo "  Reusing $gen_id (running)"
+    elif [ "$STATE" = "stopped" ]; then
+      echo "  Starting stopped instance $gen_id..."
+      aws ec2 start-instances --instance-ids "$gen_id" --region "$REGION" > /dev/null
+      aws ec2 wait instance-running --instance-ids "$gen_id" --region "$REGION"
+      echo "  $gen_id is now running"
+    else
+      echo "ERROR: Instance $gen_id is in state '$STATE' — cannot reuse"
+      exit 1
+    fi
+    GEN_IDS="$GEN_IDS $gen_id"
+    INSTANCE_IDS="$INSTANCE_IDS $gen_id"
+  done
+
+  # Pull latest code on each reused generator
+  for gen_id in $GEN_IDS; do
+    GEN_IP=$(aws ec2 describe-instances --instance-ids "$gen_id" \
+      --query 'Reservations[0].Instances[0].PublicIpAddress' --output text --region "$REGION")
+    echo "  Updating $gen_id ($GEN_IP): git pull..."
+    ssh -i "$HOME/.ssh/${KEY_PAIR_NAME}.pem" -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
+      "ec2-user@${GEN_IP}" bash -s <<'REUSE_EOF'
+set -uo pipefail
+cd ~/mirror-mirror
+git checkout main && git pull origin main
+# Clean stale worktrees
+git worktree prune
+rm -rf /home/ec2-user/mirror-mirror-workers/*
+echo "Updated"
+REUSE_EOF
+  done
+  NUM_GENERATORS=$(echo $GEN_IDS | wc -w | tr -d ' ')
+else
+  echo "=== Launching $NUM_GENERATORS Env Generator(s) ==="
+  for i in $(seq 1 "$NUM_GENERATORS"); do
+    GEN_ID=$(aws ec2 run-instances \
+      --image-id "$AL2023_AMI" \
+      --instance-type m5.xlarge \
+      --key-name "$KEY_PAIR_NAME" \
+      --subnet-id "$PUB_SUBNET" \
+      --security-group-ids "$SG_ENV" "$SG_CTRL" \
+      --iam-instance-profile Name="$ROLE_NAME" \
+      --user-data "$(gen_userdata | base64)" \
+      --block-device-mappings '[{"DeviceName":"/dev/xvda","Ebs":{"VolumeSize":30}}]' \
+      --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=mm-env-gen-$i},{Key=Project,Value=mirror-mirror},{Key=Role,Value=env-generator}]" \
+      --query 'Instances[0].InstanceId' --output text --region "$REGION")
+    echo "  Env Generator $i: $GEN_ID"
+    INSTANCE_IDS="$INSTANCE_IDS $GEN_ID"
+    GEN_IDS="$GEN_IDS $GEN_ID"
+  done
+fi
 
 echo "=== Launching $NUM_TESTERS Agent Tester(s) ==="
 for i in $(seq 1 "$NUM_TESTERS"); do
@@ -293,10 +349,14 @@ for gen_id in $GEN_IDS; do
   echo "    # Wait for setup: tail -f /var/log/mirror-mirror-setup.log"
   echo "    # Then: claude login"
   echo "    # Then: claude plugins install frontend-design"
-  echo "    # Then: cd ~/mirror-mirror && nohup python infra/env_worker.py > /tmp/mirror-mirror-logs/env-worker.log 2>&1 &"
+  echo "    # Then: cd ~/mirror-mirror && nohup \\\$HOME/venv/bin/python infra/env_worker.py > /tmp/mirror-mirror-logs/env-worker.log 2>&1 &"
   echo ""
 done
-echo "Controller and agent testers will auto-start once setup completes (~5-10 min)."
+echo "Once env generators are ready (claude login done, worker started), seed the jobs:"
+echo "  source /tmp/mirror-mirror-infra.env && set -a && source .env && set +a"
+echo "  python infra/orchestrator.py --manifest infra/env_manifest.jsonl --seed-only"
+echo ""
+echo "Agent testers auto-start once setup completes (~5-10 min)."
 echo ""
 echo "Monitor:"
 echo "  bash infra/setup/monitor_pipeline.sh"

@@ -214,8 +214,19 @@ build_env_setup() {
 
   cat <<ENVSETUP_EOF
 
-# Clone repo and checkout branch
-su - ec2-user -c 'git clone https://${GITHUB_TOKEN}@github.com/shuyanzhou/mirror-mirror.git /home/ec2-user/mirror-mirror'
+# Clone repo and checkout branch (retry up to 3 times for transient network errors)
+for attempt in 1 2 3; do
+  su - ec2-user -c 'git clone https://${GITHUB_TOKEN}@github.com/shuyanzhou/mirror-mirror.git /home/ec2-user/mirror-mirror' && break
+  echo "Clone attempt \$attempt failed, retrying in 10s..."
+  rm -rf /home/ec2-user/mirror-mirror
+  sleep 10
+done
+
+if [ ! -d /home/ec2-user/mirror-mirror/.git ]; then
+  echo "FATAL: git clone failed after 3 attempts"
+  exit 1
+fi
+
 su - ec2-user -c 'cd /home/ec2-user/mirror-mirror && git checkout ${env_id}'
 
 # Generate .claudeignore (local only — never committed)
@@ -270,36 +281,12 @@ echo "======================================"
 ENVSETUP_EOF
 }
 
-# Appended after build_env_setup when using a pre-built AMI
-build_autostart() {
-  local env_id="$1"
-  local docs_path="$2"
-
-  cat <<AUTOSTART_EOF
-
-# Auto-start pipeline
-echo "Auto-starting pipeline for: ${env_id}"
-su - ec2-user -c 'cd ~/mirror-mirror && nohup \$HOME/venv/bin/python infra/pipeline.py \\
-  --app-name ${env_id} \\
-  --docs-path ${docs_path} \\
-  --model ${MODEL} \\
-  --workers ${WORKERS} \\
-  --repetitions ${REPETITIONS} \\
-  --max-iterations ${MAX_ITERATIONS} \\
-  --branch ${env_id} \\
-  --push \\
-  --s3-bucket \$MM_S3_BUCKET \\
-  > /tmp/mirror-mirror-logs/pipeline.log 2>&1 &'
-echo "Pipeline started (PID: \$!)"
-AUTOSTART_EOF
-}
-
 build_userdata() {
   local env_id="$1"
   local docs_path="$2"
 
   if [ -n "$CUSTOM_AMI" ]; then
-    # Pre-built AMI: env-specific setup + auto-start pipeline
+    # Pre-built AMI: only env-specific setup needed (pipeline started via SSH)
     cat <<HEADER_EOF
 #!/bin/bash
 set -uo pipefail
@@ -309,7 +296,6 @@ export HOME=/home/ec2-user
 cd \$HOME
 HEADER_EOF
     build_env_setup "$env_id" "$docs_path"
-    build_autostart "$env_id" "$docs_path"
   else
     # Fresh instance: full setup
     cat <<HEADER_EOF
@@ -443,16 +429,11 @@ EOF
 echo "" >> "$LAUNCH_FILE"
 echo "# Per-instance details (env_id|instance_id|elastic_ip|eip_alloc_id)" >> "$LAUNCH_FILE"
 
+# --- Record per-instance details (parallel arrays for bash 3 compat) ---
 echo ""
-if [ -n "$CUSTOM_AMI" ]; then
-  echo "=== ACTION REQUIRED ==="
-  echo "SSH into each instance and start the pipeline:"
-  echo "(Claude login + plugins are pre-configured in the AMI)"
-else
-  echo "=== ACTION REQUIRED ==="
-  echo "SSH into each instance, run 'claude login', then start the pipeline:"
-fi
-echo ""
+ALL_IPS=""
+ALL_ENVS=""
+ALL_DOCS=""
 
 for INST_ID in $INSTANCE_IDS; do
   IP=$(aws ec2 describe-instances --instance-ids "$INST_ID" \
@@ -462,19 +443,113 @@ for INST_ID in $INSTANCE_IDS; do
   ALLOC_ID=$(aws ec2 describe-addresses --filters "Name=instance-id,Values=$INST_ID" \
     --query 'Addresses[0].AllocationId' --output text --region "$REGION")
 
-  echo "# ${ENV_ID}|${INST_ID}|${IP}|${ALLOC_ID}" >> "$LAUNCH_FILE"
+  ALL_IPS="$ALL_IPS $IP"
+  ALL_ENVS="$ALL_ENVS $ENV_ID"
 
-  echo "  ssh -i ~/.ssh/${KEY_PAIR}.pem ec2-user@${IP}"
-  echo "    # Wait for setup: tail -f /var/log/mirror-mirror-setup.log"
-  if [ -z "$CUSTOM_AMI" ]; then
-    echo "    # Then: claude login"
-    echo "    # Then: claude plugins install frontend-design"
-  fi
-  echo "    # Then: start pipeline (command shown at end of setup log)"
-  echo ""
+  # Look up docs_path from manifest
+  DOCS=""
+  for entry in "${ENVS[@]}"; do
+    eid=$(echo "$entry" | python3 -c "import sys,json; print(json.load(sys.stdin)['env_id'])")
+    if [ "$eid" = "$ENV_ID" ]; then
+      DOCS=$(echo "$entry" | python3 -c "import sys,json; print(json.load(sys.stdin)['docs_path'])")
+      break
+    fi
+  done
+  ALL_DOCS="$ALL_DOCS $DOCS"
+
+  echo "# ${ENV_ID}|${INST_ID}|${IP}|${ALLOC_ID}" >> "$LAUNCH_FILE"
 done
 
+# Convert to arrays
+IPS=($ALL_IPS)
+ENV_IDS=($ALL_ENVS)
+DOCS_PATHS=($ALL_DOCS)
+
 echo "Instance info saved to: $LAUNCH_FILE"
+
+# --- For AMI mode: wait for setup then start pipeline via SSH ---
+if [ -n "$CUSTOM_AMI" ]; then
+  echo ""
+  echo "=== Waiting for setup to complete on all instances ==="
+  SSH_OPTS="-i $HOME/.ssh/${KEY_PAIR}.pem -o StrictHostKeyChecking=no -o ConnectTimeout=5 -o BatchMode=yes"
+  MAX_WAIT=300  # 5 minutes
+  POLL_INTERVAL=15
+
+  for i in "${!IPS[@]}"; do
+    IP="${IPS[$i]}"
+    ENV_ID="${ENV_IDS[$i]}"
+    elapsed=0
+
+    printf "  %-30s waiting..." "$ENV_ID"
+    while [ $elapsed -lt $MAX_WAIT ]; do
+      READY=$(ssh $SSH_OPTS "ec2-user@${IP}" "test -f ~/.setup-complete && echo yes || echo no" 2>/dev/null || echo "unreachable")
+      if [ "$READY" = "yes" ]; then
+        # Verify clone succeeded
+        CLONE_OK=$(ssh $SSH_OPTS "ec2-user@${IP}" "test -d ~/mirror-mirror/.git && echo yes || echo no" 2>/dev/null || echo "no")
+        if [ "$CLONE_OK" = "yes" ]; then
+          echo " ready"
+          break
+        else
+          echo " FAILED (clone missing)"
+          break
+        fi
+      fi
+      sleep $POLL_INTERVAL
+      elapsed=$((elapsed + POLL_INTERVAL))
+    done
+
+    if [ $elapsed -ge $MAX_WAIT ]; then
+      echo " TIMEOUT"
+    fi
+  done
+
+  echo ""
+  echo "=== Starting pipelines via SSH ==="
+
+  for i in "${!IPS[@]}"; do
+    IP="${IPS[$i]}"
+    ENV_ID="${ENV_IDS[$i]}"
+    DOCS="${DOCS_PATHS[$i]}"
+
+    # Verify instance is ready
+    CLONE_OK=$(ssh $SSH_OPTS "ec2-user@${IP}" "test -d ~/mirror-mirror/.git && echo yes || echo no" 2>/dev/null || echo "no")
+    if [ "$CLONE_OK" != "yes" ]; then
+      echo "  SKIP $ENV_ID — setup incomplete (ssh -i ~/.ssh/${KEY_PAIR}.pem ec2-user@${IP})"
+      continue
+    fi
+
+    PIPELINE_CMD="cd ~/mirror-mirror && nohup \$HOME/venv/bin/python infra/pipeline.py \
+      --app-name ${ENV_ID} \
+      --docs-path ${DOCS} \
+      --model ${MODEL} \
+      --workers ${WORKERS} \
+      --repetitions ${REPETITIONS} \
+      --max-iterations ${MAX_ITERATIONS} \
+      --branch ${ENV_ID} \
+      --push \
+      --s3-bucket \$MM_S3_BUCKET \
+      > /tmp/mirror-mirror-logs/pipeline.log 2>&1 &"
+
+    ssh $SSH_OPTS "ec2-user@${IP}" "$PIPELINE_CMD" 2>/dev/null
+    echo "  STARTED $ENV_ID @ $IP"
+  done
+else
+  echo ""
+  echo "=== ACTION REQUIRED ==="
+  echo "SSH into each instance, run 'claude login', install plugins, then start the pipeline:"
+  echo ""
+  for i in "${!IPS[@]}"; do
+    IP="${IPS[$i]}"
+    ENV_ID="${ENV_IDS[$i]}"
+    echo "  ssh -i ~/.ssh/${KEY_PAIR}.pem ec2-user@${IP}"
+    echo "    # Wait for setup: tail -f /var/log/mirror-mirror-setup.log"
+    echo "    # Then: claude login"
+    echo "    # Then: claude plugins install frontend-design"
+    echo "    # Then: start pipeline (command shown at end of setup log)"
+    echo ""
+  done
+fi
+
 echo ""
 echo "NOTE: Elastic IPs are stable across stop/start cycles."
 echo "      To release them during teardown, run:"

@@ -292,6 +292,10 @@ exec > /var/log/mirror-mirror-setup.log 2>&1
 
 export HOME=/home/ec2-user
 cd \$HOME
+
+# Clear stale sentinel from AMI so start_pipelines.sh waits for this
+# user-data to finish (clone, env vars, etc.) before starting the pipeline.
+rm -f /home/ec2-user/.setup-complete
 HEADER_EOF
     build_env_setup "$env_id" "$docs_path"
   else

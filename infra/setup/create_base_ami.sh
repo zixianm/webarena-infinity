@@ -196,6 +196,20 @@ echo "4. Exit SSH and press Enter here to create the AMI."
 echo ""
 read -rp "Press Enter when ready to create AMI (or Ctrl+C to abort)..."
 
+# Pre-accept --dangerously-skip-permissions trust dialog so pipeline runs non-interactively
+echo ""
+echo "=== Pre-accepting --dangerously-skip-permissions trust dialog ==="
+ssh -i "$HOME/.ssh/${KEY_PAIR}.pem" -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
+  "ec2-user@${PUBLIC_IP}" \
+  "python3 -c \"
+import json
+with open('/home/ec2-user/.claude.json', 'r+') as f:
+    d = json.load(f)
+    d.setdefault('projects', {}).setdefault('/home/ec2-user', {})['hasTrustDialogAccepted'] = True
+    f.seek(0); json.dump(d, f, indent=2); f.truncate()
+print('Done: hasTrustDialogAccepted set')
+\""
+
 # --- Create AMI ---
 AMI_NAME="${AMI_NAME_PREFIX}-$(date -u +%Y%m%d-%H%M%S)"
 echo ""

@@ -112,16 +112,10 @@ for i in "${!IPS[@]}"; do
 
   printf "waiting..."
   while [ $elapsed -lt $MAX_WAIT ]; do
-    READY=$(ssh $SSH_OPTS "ec2-user@${IP}" "test -f ~/.setup-complete && echo yes || echo no" 2>/dev/null || echo "unreachable")
+    READY=$(ssh $SSH_OPTS "ec2-user@${IP}" "test -f ~/.setup-complete && test -d ~/mirror-mirror/.git && echo yes || echo no" 2>/dev/null || echo "unreachable")
     if [ "$READY" = "yes" ]; then
-      CLONE_OK=$(ssh $SSH_OPTS "ec2-user@${IP}" "test -d ~/mirror-mirror/.git && echo yes || echo no" 2>/dev/null || echo "no")
-      if [ "$CLONE_OK" = "yes" ]; then
-        echo " ready"
-        break
-      else
-        echo " FAILED (clone missing)"
-        break
-      fi
+      echo " ready"
+      break
     fi
     sleep $POLL_INTERVAL
     elapsed=$((elapsed + POLL_INTERVAL))

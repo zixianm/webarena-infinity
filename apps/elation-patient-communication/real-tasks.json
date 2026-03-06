@@ -302,7 +302,7 @@
   {
     "id": "task_h11",
     "difficulty": "hard",
-    "instruction": "Tag all geriatric patients who don't already have the 'Chronic Care' tag with it.",
+    "instruction": "Tag all patients who have the 'Geriatric' tag but don't already have the 'Chronic Care' tag with it.",
     "verify": "real-tasks/task_h11.py"
   },
   {

@@ -401,6 +401,7 @@ const Views = {
         if (patient.emergencyContact) {
             html += this._detailRow('Emergency Contact', `${patient.emergencyContact.name} (${patient.emergencyContact.relationship}) - ${patient.emergencyContact.phone}`);
         }
+        html += `<button class="btn btn-sm btn-text" data-action="edit-emergency-contact" data-patient="${patient.id}" data-testid="edit-emergency-contact-btn">${patient.emergencyContact ? 'Edit' : '+ Add'} Emergency Contact</button>`;
         html += '</div>';
         html += '<div class="detail-section">';
         html += '<h3>Tags</h3><div class="tags-list">';
@@ -413,6 +414,8 @@ const Views = {
         html += `<h3>SMS Status</h3>${Components.smsOptInBadge(patient.smsOptInStatus)}`;
         if (patient.smsOptInStatus !== 'opted_in') {
             html += `<button class="btn btn-sm btn-text" data-action="request-sms-optin" data-patient="${patient.id}" data-testid="request-optin-btn">Request Opt-In</button>`;
+        } else {
+            html += `<button class="btn btn-sm btn-danger" data-action="opt-out-sms" data-patient="${patient.id}" data-testid="opt-out-sms-btn">Opt Out of SMS</button>`;
         }
         html += '</div></div>';
 
@@ -435,6 +438,7 @@ const Views = {
         } else if (patient.passportStatus === 'invited') {
             html += `<button class="btn btn-secondary" data-action="resend-passport-invite" data-patient="${patient.id}" data-testid="resend-invite-btn">Re-send Invitation</button>`;
             html += `<button class="btn btn-sm btn-text" data-action="view-invitation-code" data-patient="${patient.id}" data-testid="view-code-btn">View Invitation Code</button>`;
+            html += `<button class="btn btn-danger btn-sm" data-action="disable-passport" data-patient="${patient.id}" data-testid="disable-passport-btn">Disable Passport Account</button>`;
         } else if (patient.passportStatus === 'registered' && !patient.passportAccountDisabled) {
             html += `<button class="btn btn-danger btn-sm" data-action="disable-passport" data-patient="${patient.id}" data-testid="disable-passport-btn">Disable Passport Account</button>`;
         }
@@ -571,7 +575,7 @@ const Views = {
             html += '<div class="card-empty">No past appointments</div>';
         } else {
             html += '<div class="appointments-table-container"><table class="appointments-table">';
-            html += '<thead><tr><th>Date</th><th>Time</th><th>Patient</th><th>Provider</th><th>Type</th><th>Reason</th><th>Status</th></tr></thead><tbody>';
+            html += '<thead><tr><th>Date</th><th>Time</th><th>Patient</th><th>Provider</th><th>Type</th><th>Reason</th><th>Status</th><th>Actions</th></tr></thead><tbody>';
             for (const appt of past) {
                 const pName = AppState.getPatientName(appt.patientId);
                 const provName = AppState.getProviderName(appt.providerId);
@@ -583,6 +587,7 @@ const Views = {
                 html += `<td>${appt.place === 'virtual' ? '&#x1F4F9; Virtual' : '&#x1F3E5; In-person'}</td>`;
                 html += `<td>${Components.escapeHtml(appt.reason)}</td>`;
                 html += `<td><span class="status-${appt.status}">${appt.status}</span></td>`;
+                html += `<td>${appt.status === 'scheduled' ? `<button class="btn btn-sm btn-danger" data-action="cancel-appointment" data-appointment="${appt.id}">Cancel</button>` : ''}</td>`;
                 html += '</tr>';
             }
             html += '</tbody></table></div>';
@@ -973,6 +978,19 @@ const Views = {
         html += '<button class="btn btn-primary" data-action="confirm-send-bulk" data-testid="confirm-bulk-btn">Send Bulk Letter</button>';
         html += '<button class="btn btn-secondary" data-action="close-modal">Cancel</button>';
         html += '</div>';
+        html += '</div>';
+        return html;
+    },
+
+    // ── Emergency Contact Modal ────────────────────────────
+    renderEmergencyContactModal(patientId) {
+        const patient = AppState.getPatient(patientId);
+        const ec = patient?.emergencyContact || {};
+        let html = '<div class="emergency-contact-form" data-testid="emergency-contact-form">';
+        html += `<div class="form-group"><label class="form-label">Name</label><input type="text" id="ec-name" class="form-input" value="${Components.escapeAttr(ec.name || '')}" data-testid="ec-name"></div>`;
+        html += `<div class="form-group"><label class="form-label">Phone</label><input type="text" id="ec-phone" class="form-input" value="${Components.escapeAttr(ec.phone || '')}" data-testid="ec-phone"></div>`;
+        html += `<div class="form-group"><label class="form-label">Relationship</label><input type="text" id="ec-relationship" class="form-input" value="${Components.escapeAttr(ec.relationship || '')}" data-testid="ec-relationship"></div>`;
+        html += `<button class="btn btn-primary" data-action="save-emergency-contact" data-patient="${patientId}" data-testid="save-ec-btn">Save</button>`;
         html += '</div>';
         return html;
     },

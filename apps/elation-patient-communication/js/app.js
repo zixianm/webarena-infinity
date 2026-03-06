@@ -550,6 +550,36 @@ const App = {
                 }
                 break;
             }
+            case 'opt-out-sms': {
+                const patient = AppState.getPatient(el.dataset.patient);
+                if (patient) {
+                    AppState.updatePatientDemographics(el.dataset.patient, { smsOptInStatus: 'opted_out' });
+                    Components.showToast(`${patient.firstName} ${patient.lastName} has been opted out of SMS.`, 'success');
+                    App.render();
+                }
+                break;
+            }
+
+            // Emergency Contact
+            case 'edit-emergency-contact':
+                Components.showModal('Emergency Contact', Views.renderEmergencyContactModal(el.dataset.patient), '');
+                break;
+            case 'save-emergency-contact': {
+                const ecName = document.getElementById('ec-name')?.value?.trim();
+                const ecPhone = document.getElementById('ec-phone')?.value?.trim();
+                const ecRelationship = document.getElementById('ec-relationship')?.value?.trim();
+                if (!ecName || !ecPhone || !ecRelationship) {
+                    Components.showToast('Please fill in all emergency contact fields.', 'error');
+                    break;
+                }
+                AppState.updatePatientDemographics(el.dataset.patient, {
+                    emergencyContact: { name: ecName, phone: ecPhone, relationship: ecRelationship }
+                });
+                Components.closeModal();
+                Components.showToast('Emergency contact saved.', 'success');
+                App.render();
+                break;
+            }
 
             // Reminders
             case 'acknowledge-reminder':
@@ -943,7 +973,7 @@ const App = {
 
     // ── Dropdown Handler ────────────────────────────────────
     handleDropdownSelect(ddId, value) {
-        // Update dropdown display text
+        // Update dropdown display text and selected class
         const dd = document.getElementById(ddId);
         if (dd) {
             const trigger = dd.querySelector('.dropdown-trigger');
@@ -951,6 +981,9 @@ const App = {
             if (trigger && item) {
                 trigger.innerHTML = item.textContent + '<span class="dropdown-arrow">&#x25BC;</span>';
             }
+            // Move 'selected' class to newly selected item
+            dd.querySelectorAll('.dropdown-item.selected').forEach(el => el.classList.remove('selected'));
+            if (item) item.classList.add('selected');
         }
 
         // Handle specific dropdowns

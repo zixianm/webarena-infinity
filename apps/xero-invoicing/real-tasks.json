@@ -478,5 +478,125 @@
     "difficulty": "hard",
     "instruction": "Add an invoice reminder that fires 3 days before the due date.",
     "verify": "real-tasks/task_h40.py"
+  },
+  {
+    "id": "task_h41",
+    "difficulty": "hard",
+    "instruction": "Record a full payment on the invoice with the largest outstanding balance.",
+    "verify": "real-tasks/task_h41.py"
+  },
+  {
+    "id": "task_h42",
+    "difficulty": "hard",
+    "instruction": "Pay off the smaller of CloudNine Analytics' two open invoices.",
+    "verify": "real-tasks/task_h42.py"
+  },
+  {
+    "id": "task_h43",
+    "difficulty": "hard",
+    "instruction": "Accept the Atlas Engineering Consultants quote for the collaboration platform, convert it to an invoice, approve and send it.",
+    "verify": "real-tasks/task_h43.py"
+  },
+  {
+    "id": "task_h44",
+    "difficulty": "hard",
+    "instruction": "On the Retail branding theme, hide the ABN and turn on the payment advice slip.",
+    "verify": "real-tasks/task_h44.py"
+  },
+  {
+    "id": "task_h45",
+    "difficulty": "hard",
+    "instruction": "Pay off every overdue invoice that hasn't received any payment yet.",
+    "verify": "real-tasks/task_h45.py"
+  },
+  {
+    "id": "task_h46",
+    "difficulty": "hard",
+    "instruction": "Allocate CloudNine Analytics' open credit note against their invoice that is due soonest.",
+    "verify": "real-tasks/task_h46.py"
+  },
+  {
+    "id": "task_h47",
+    "difficulty": "hard",
+    "instruction": "Fully pay the overdue invoice belonging to the client who also has a draft repeating invoice set up.",
+    "verify": "real-tasks/task_h47.py"
+  },
+  {
+    "id": "task_h48",
+    "difficulty": "hard",
+    "instruction": "Change the default payment terms to end of the following month and set the quote numbering to start at 50.",
+    "verify": "real-tasks/task_h48.py"
+  },
+  {
+    "id": "task_h49",
+    "difficulty": "hard",
+    "instruction": "Record a $2,000 partial payment on Pinnacle Construction's invoice that has a PO reference.",
+    "verify": "real-tasks/task_h49.py"
+  },
+  {
+    "id": "task_h50",
+    "difficulty": "hard",
+    "instruction": "Create a new branding theme called 'Consulting', then invoice Wellington & Partners in New Zealand dollars for 4 hours of consulting using that theme.",
+    "verify": "real-tasks/task_h50.py"
+  },
+  {
+    "id": "task_h51",
+    "difficulty": "hard",
+    "instruction": "Duplicate the Coastal Living Interiors invoice that uses the Simple Clean template, and switch the copy's branding to Professional Services.",
+    "verify": "real-tasks/task_h51.py"
+  },
+  {
+    "id": "task_h52",
+    "difficulty": "hard",
+    "instruction": "Approve and send both invoices that are currently awaiting approval.",
+    "verify": "real-tasks/task_h52.py"
+  },
+  {
+    "id": "task_h53",
+    "difficulty": "hard",
+    "instruction": "Decline Metro Fabrication Works' current quote and send them a new quote for 5 Widget Type B units.",
+    "verify": "real-tasks/task_h53.py"
+  },
+  {
+    "id": "task_h54",
+    "difficulty": "hard",
+    "instruction": "Add a 45-day overdue reminder with the subject 'Final notice: Invoice {InvoiceNumber} - Account referred to collections'. Include the invoice PDF but not the summary.",
+    "verify": "real-tasks/task_h54.py"
+  },
+  {
+    "id": "task_h55",
+    "difficulty": "hard",
+    "instruction": "Invoice the client with the most unpaid invoices for an annual software license.",
+    "verify": "real-tasks/task_h55.py"
+  },
+  {
+    "id": "task_h56",
+    "difficulty": "hard",
+    "instruction": "Remove the partial payment from Pinnacle Construction's invoice and then void it.",
+    "verify": "real-tasks/task_h56.py"
+  },
+  {
+    "id": "task_h57",
+    "difficulty": "hard",
+    "instruction": "Set up a weekly repeating invoice for Vanguard Security Systems for 2 hours of development, using the Retail template, auto-approved for sending, running from June through December 2026.",
+    "verify": "real-tasks/task_h57.py"
+  },
+  {
+    "id": "task_h58",
+    "difficulty": "hard",
+    "instruction": "Change the invoice prefix to DEMO- and start numbering at 200, then create an invoice for Greenfield Organics for 1 day of on-site training.",
+    "verify": "real-tasks/task_h58.py"
+  },
+  {
+    "id": "task_h59",
+    "difficulty": "hard",
+    "instruction": "Issue Coastal Living Interiors a credit note for 2 returned Widget A units, approve it, and allocate it against their open invoice.",
+    "verify": "real-tasks/task_h59.py"
+  },
+  {
+    "id": "task_h60",
+    "difficulty": "hard",
+    "instruction": "Change all repeating invoices that are set to auto-send so they save as draft instead.",
+    "verify": "real-tasks/task_h60.py"
   }
 ]

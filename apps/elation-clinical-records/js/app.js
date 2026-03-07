@@ -603,7 +603,7 @@ const App = {
         const dateVal = document.getElementById('vitals-date')?.value?.trim();
         const sys = document.getElementById('vitals-sys')?.value?.trim();
         const dia = document.getElementById('vitals-dia')?.value?.trim();
-        if (!sys && !dia && !document.getElementById('vitals-hr')?.value?.trim() && !document.getElementById('vitals-temp')?.value?.trim() && !document.getElementById('vitals-weight')?.value?.trim()) {
+        if (!sys && !dia && !document.getElementById('vitals-hr')?.value?.trim() && !document.getElementById('vitals-temp')?.value?.trim() && !document.getElementById('vitals-weight')?.value?.trim() && !document.getElementById('vitals-pain')?.value?.trim() && !document.getElementById('vitals-spo2')?.value?.trim() && !document.getElementById('vitals-rr')?.value?.trim() && !document.getElementById('vitals-height')?.value?.trim()) {
             AppState.showToast('Please enter at least one vital sign');
             return;
         }

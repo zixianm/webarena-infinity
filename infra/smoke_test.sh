@@ -71,13 +71,15 @@ if ! command -v claude &>/dev/null; then fail "claude CLI not found"; else
   else
     fail "Claude CLI not authenticated"
   fi
-  HELLO=$(unset CLAUDECODE && cd ~/mirror-mirror && timeout 60 claude --dangerously-skip-permissions -p "Say hello" --max-turns 1 --output-format text 2>&1 || true)
-  HELLO_SHORT=$(echo "$HELLO" | tr '\n' ' ' | head -c 120)
-  if [ -n "$HELLO" ] && ! echo "$HELLO" | grep -qi "error\|unauthorized\|denied\|refused\|timed out"; then
+  CLAUDE_TMP=$(mktemp /tmp/smoke-claude-XXXXXX)
+  (unset CLAUDECODE; cd ~/mirror-mirror && timeout 60 claude --dangerously-skip-permissions -p "Say hello" --max-turns 1 --output-format text > "$CLAUDE_TMP" 2>&1) || true
+  HELLO_SHORT=$(tr '\n' ' ' < "$CLAUDE_TMP" | head -c 120)
+  if [ -s "$CLAUDE_TMP" ] && ! grep -qi "error\|unauthorized\|denied\|refused\|timed out" "$CLAUDE_TMP"; then
     pass "Claude CLI --dangerously-skip-permissions: $HELLO_SHORT"
   else
     fail "Claude CLI --dangerously-skip-permissions: $HELLO_SHORT"
   fi
+  rm -f "$CLAUDE_TMP"
 fi
 
 # ── 3a. GitHub Token ──

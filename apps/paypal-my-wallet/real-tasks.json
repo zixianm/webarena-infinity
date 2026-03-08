@@ -102,5 +102,26 @@
   {"id": "task_h57", "difficulty": "hard", "instruction": "Buy a $25 DoorDash gift card for yourself, then sell $25 of Litecoin.", "verify": "real-tasks/task_h57.py"},
   {"id": "task_h58", "difficulty": "hard", "instruction": "Find how many reward points I've earned this year and redeem exactly 10% of that amount for PayPal balance.", "verify": "real-tasks/task_h58.py"},
   {"id": "task_h59", "difficulty": "hard", "instruction": "Sell $100 of Ethereum and $100 of Bitcoin, then pay $200 toward my PayPal Credit.", "verify": "real-tasks/task_h59.py"},
-  {"id": "task_h60", "difficulty": "hard", "instruction": "Change my debit card cashback category to Groceries, then buy a $25 Uber gift card for yourself.", "verify": "real-tasks/task_h60.py"}
+  {"id": "task_h60", "difficulty": "hard", "instruction": "Change my debit card cashback category to Groceries, then buy a $25 Uber gift card for yourself.", "verify": "real-tasks/task_h60.py"},
+
+  {"id": "task_h61", "difficulty": "hard", "instruction": "Sell all of my Chainlink crypto holdings and deposit $200 into savings.", "verify": "real-tasks/task_h61.py"},
+  {"id": "task_h62", "difficulty": "hard", "instruction": "Set the most recently added confirmed credit card as my preferred payment method, and remove my oldest credit card from the wallet.", "verify": "real-tasks/task_h62.py"},
+  {"id": "task_h63", "difficulty": "hard", "instruction": "Save every available offer that has a maximum cashback reward of $15 or more.", "verify": "real-tasks/task_h63.py"},
+  {"id": "task_h64", "difficulty": "hard", "instruction": "Find my Pay in 4 plan with the most remaining payments and convert that plan's next payment amount from dollars to British pounds.", "verify": "real-tasks/task_h64.py"},
+  {"id": "task_h65", "difficulty": "hard", "instruction": "Remove all bank accounts that have a savings account type, then withdraw $500 from my PayPal Savings to my main balance.", "verify": "real-tasks/task_h65.py"},
+  {"id": "task_h66", "difficulty": "hard", "instruction": "Set the confirmed card that expires soonest as my backup payment method.", "verify": "real-tasks/task_h66.py"},
+  {"id": "task_h67", "difficulty": "hard", "instruction": "Check how much interest my savings account earned this month, then redeem that same dollar amount in reward points as PayPal Balance.", "verify": "real-tasks/task_h67.py"},
+  {"id": "task_h68", "difficulty": "hard", "instruction": "Convert all my Australian dollars to US dollars, remove the Australian Dollar currency, then buy $100 of Ethereum.", "verify": "real-tasks/task_h68.py"},
+  {"id": "task_h69", "difficulty": "hard", "instruction": "Buy a $100 Apple gift card for yourself, then change the debit card cashback category to Fuel and raise the daily spending limit to $5,000.", "verify": "real-tasks/task_h69.py"},
+  {"id": "task_h70", "difficulty": "hard", "instruction": "If my PayPal Credit balance is over $1,000, make a $500 payment on it. Otherwise just pay the minimum due. Then turn off autopay.", "verify": "real-tasks/task_h70.py"},
+  {"id": "task_h71", "difficulty": "hard", "instruction": "Find the total remaining balance across all my gift cards and deposit that exact amount into my PayPal Savings.", "verify": "real-tasks/task_h71.py"},
+  {"id": "task_h72", "difficulty": "hard", "instruction": "Buy $75 of the cryptocurrency with the second-highest return percentage, and sell $75 of the one with the lowest positive return.", "verify": "real-tasks/task_h72.py"},
+  {"id": "task_h73", "difficulty": "hard", "instruction": "Add Polish Zloty to my currencies, convert $200 to PLN, deposit $300 into savings, and set my debit card ATM limit to $500.", "verify": "real-tasks/task_h73.py"},
+  {"id": "task_h74", "difficulty": "hard", "instruction": "Buy a gift card for the same merchant and same amount as my most recently purchased active gift card, and send it to yourself.", "verify": "real-tasks/task_h74.py"},
+  {"id": "task_h75", "difficulty": "hard", "instruction": "Withdraw $1,500 from savings, add $500 from my Chase checking account, convert $1,000 to euros, and buy a $100 Best Buy gift card for yourself.", "verify": "real-tasks/task_h75.py"},
+  {"id": "task_h76", "difficulty": "hard", "instruction": "Remove the confirmed bank account that was used least recently.", "verify": "real-tasks/task_h76.py"},
+  {"id": "task_h77", "difficulty": "hard", "instruction": "Flip all my email notification settings — enable the ones that are off and disable the ones that are on — but keep security alerts enabled no matter what.", "verify": "real-tasks/task_h77.py"},
+  {"id": "task_h78", "difficulty": "hard", "instruction": "Count how many active Pay in 4 plans I have, multiply that number by $25, and buy a Starbucks gift card for yourself in that amount.", "verify": "real-tasks/task_h78.py"},
+  {"id": "task_h79", "difficulty": "hard", "instruction": "Sell $150 of Bitcoin, use $100 of that to pay down my PayPal Credit, and put $50 into savings.", "verify": "real-tasks/task_h79.py"},
+  {"id": "task_h80", "difficulty": "hard", "instruction": "Save all available Food & Drink offers, buy a $25 DoorDash gift card for yourself, and switch currency conversion to use my card issuer.", "verify": "real-tasks/task_h80.py"}
 ]

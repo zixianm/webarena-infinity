@@ -1048,13 +1048,178 @@ def solve_task_h60(state):
     purchase_gift_card(state, "Uber", 25, user_email, user_name, "")
 
 
+# ---- HARDENING ROUND 3 ----
+
+def solve_task_h61(state):
+    """Sell all Chainlink holdings (~$234.38), deposit $200 into savings."""
+    link = find_crypto(state, "LINK")
+    sell_amount = round(link["quantity"] * link["currentPrice"] * 100) / 100
+    sell_crypto(state, "LINK", sell_amount)
+    deposit_to_savings(state, 200)
+
+
+def solve_task_h62(state):
+    """Set most recently added confirmed credit card (MC 2290) as preferred,
+    remove oldest credit card (Visa 4829)."""
+    # Set MC 2290 as preferred
+    for c in state["cards"]:
+        c["isPreferred"] = False
+    card = find_card(state, "2290")
+    card["isPreferred"] = True
+    state["walletPreferences"]["preferredPaymentMethod"] = card["id"]
+    state["currentUser"]["preferredPaymentMethodId"] = card["id"]
+    # Remove oldest credit card (Visa 4829)
+    state["cards"] = [c for c in state["cards"] if c["lastFour"] != "4829"]
+
+
+def solve_task_h63(state):
+    """Save every available offer with maxCashback >= $15."""
+    for offer in state["offers"]:
+        if offer.get("status") == "available" and offer.get("maxCashback", 0) >= 15:
+            offer["status"] = "saved"
+            offer["savedAt"] = now_iso()
+
+
+def solve_task_h64(state):
+    """Convert Nike Pay in 4 next payment ($47.25) from USD to GBP."""
+    # Nike has 3 remaining payments (most). Next payment: $47.25.
+    convert_currency(state, "USD", "GBP", 47.25)
+
+
+def solve_task_h65(state):
+    """Remove savings-type bank accounts, withdraw $500 from PayPal Savings."""
+    state["bankAccounts"] = [
+        b for b in state["bankAccounts"]
+        if b.get("accountType") != "savings"
+    ]
+    withdraw_from_savings(state, 500)
+
+
+def solve_task_h66(state):
+    """Set confirmed card expiring soonest (AmEx 3001, 12/2026) as backup."""
+    for c in state["cards"]:
+        c["isBackup"] = False
+    card = find_card(state, "3001")
+    card["isBackup"] = True
+    state["walletPreferences"]["backupPaymentMethod"] = card["id"]
+    state["currentUser"]["backupPaymentMethodId"] = card["id"]
+
+
+def solve_task_h67(state):
+    """Redeem savings interest this month ($43.62 = 4362 points) as PayPal Balance."""
+    interest = state["savingsAccount"]["interestEarnedThisMonth"]
+    points = int(round(interest * 100))
+    redeem_rewards(state, points, "balance")
+
+
+def solve_task_h68(state):
+    """Convert all AUD to USD, remove AUD, buy $100 ETH."""
+    aud = find_balance(state, "AUD")
+    convert_currency(state, "AUD", "USD", aud["amount"])
+    state["balances"] = [b for b in state["balances"] if b["currency"] != "AUD"]
+    buy_crypto(state, "ETH", 100)
+
+
+def solve_task_h69(state):
+    """Buy $100 Apple gift card for self, set cashback to Fuel, spending limit to 5000."""
+    user_email = state["currentUser"]["email"]
+    user_name = f"{state['currentUser']['firstName']} {state['currentUser']['lastName']}"
+    purchase_gift_card(state, "Apple", 100, user_email, user_name, "")
+    state["paypalDebitCard"]["cashBackCategory"] = "Fuel"
+    state["paypalDebitCard"]["dailySpendingLimit"] = 5000
+
+
+def solve_task_h70(state):
+    """Pay $500 on credit (balance > $1000), then disable autopay."""
+    make_credit_payment(state, 500)
+    state["paypalCredit"]["autopayEnabled"] = False
+
+
+def solve_task_h71(state):
+    """Deposit total gift card remaining balance ($167.50) into savings."""
+    total = sum(gc.get("remainingBalance", 0) for gc in state["giftCards"])
+    deposit_to_savings(state, total)
+
+
+def solve_task_h72(state):
+    """Buy $75 ETH (2nd-highest return), sell $75 BCH (lowest positive return)."""
+    buy_crypto(state, "ETH", 75)
+    sell_crypto(state, "BCH", 75)
+
+
+def solve_task_h73(state):
+    """Add PLN, convert $200 to PLN, deposit $300 to savings, ATM limit $500."""
+    state["balances"].append({"currency": "PLN", "amount": 0, "isPrimary": False})
+    convert_currency(state, "USD", "PLN", 200)
+    deposit_to_savings(state, 300)
+    state["paypalDebitCard"]["dailyATMLimit"] = 500
+
+
+def solve_task_h74(state):
+    """Buy $30 Netflix gift card for self (matches most recently purchased active gc)."""
+    user_email = state["currentUser"]["email"]
+    user_name = f"{state['currentUser']['firstName']} {state['currentUser']['lastName']}"
+    purchase_gift_card(state, "Netflix", 30, user_email, user_name, "")
+
+
+def solve_task_h75(state):
+    """Withdraw $1500 from savings, add $500 from Chase, convert $1000 to EUR, buy $100 Best Buy gc."""
+    withdraw_from_savings(state, 1500)
+    add_money(state, 500, "6742")
+    convert_currency(state, "USD", "EUR", 1000)
+    user_email = state["currentUser"]["email"]
+    user_name = f"{state['currentUser']['firstName']} {state['currentUser']['lastName']}"
+    purchase_gift_card(state, "Best Buy", 100, user_email, user_name, "")
+
+
+def solve_task_h76(state):
+    """Remove least recently used confirmed bank account (US Bank 7823)."""
+    state["bankAccounts"] = [b for b in state["bankAccounts"] if b["lastFour"] != "7823"]
+
+
+def solve_task_h77(state):
+    """Flip all email notifications, but keep security alerts always on."""
+    notifs = state["walletPreferences"]["emailNotifications"]
+    for key in list(notifs.keys()):
+        if key == "securityAlerts":
+            notifs[key] = True
+        else:
+            notifs[key] = not notifs[key]
+
+
+def solve_task_h78(state):
+    """Buy $50 Starbucks gc for self (2 active plans × $25)."""
+    user_email = state["currentUser"]["email"]
+    user_name = f"{state['currentUser']['firstName']} {state['currentUser']['lastName']}"
+    purchase_gift_card(state, "Starbucks", 50, user_email, user_name, "")
+
+
+def solve_task_h79(state):
+    """Sell $150 BTC, pay $100 on credit, deposit $50 into savings."""
+    sell_crypto(state, "BTC", 150)
+    make_credit_payment(state, 100)
+    deposit_to_savings(state, 50)
+
+
+def solve_task_h80(state):
+    """Save all available Food & Drink offers, buy $25 DoorDash gc, set card issuer conversion."""
+    for offer in state["offers"]:
+        if offer.get("category") == "Food & Drink" and offer.get("status") == "available":
+            offer["status"] = "saved"
+            offer["savedAt"] = now_iso()
+    user_email = state["currentUser"]["email"]
+    user_name = f"{state['currentUser']['firstName']} {state['currentUser']['lastName']}"
+    purchase_gift_card(state, "DoorDash", 25, user_email, user_name, "")
+    state["walletPreferences"]["currencyConversionOption"] = "card_issuer"
+
+
 # ---------------------------------------------------------------------------
 # Solver registry
 # ---------------------------------------------------------------------------
 
 SOLVERS = {}
 for _prefix in ("e", "m", "h"):
-    for _i in range(1, 61):
+    for _i in range(1, 81):
         _task_id = f"task_{_prefix}{_i}"
         _fn_name = f"solve_{_task_id}"
         if _fn_name in globals():

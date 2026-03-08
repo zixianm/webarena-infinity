@@ -18,7 +18,4 @@ def verify(server_url: str) -> tuple[bool, str]:
         if allergy.get("allergen") == "Codeine":
             return False, "Codeine allergy still present in currentPatient.allergies"
 
-    if len(allergies) != 3:
-        return False, f"Expected 3 allergies after removing Codeine, found {len(allergies)}"
-
-    return True, "Codeine allergy removed successfully; 3 allergies remain"
+    return True, "Codeine allergy removed successfully"

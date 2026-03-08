@@ -881,6 +881,342 @@ def solve_task_h20(state):
     state["currentPatient"]["lastReconciledDate"] = NOW_ISO
 
 
+# ── HARD (hardening round 1) ──
+
+def solve_task_h21(state):
+    """Discontinue controlled substance (Alprazolam), cancel, prescribe Hydroxyzine."""
+    _discontinue_med(state, "Alprazolam 0.5mg tablet", "permanentRxMeds",
+                     "I want to discontinue this medication",
+                     details="Patient is transitioning to non-controlled alternatives",
+                     send_cancel=True)
+    _add_prescription(state,
+                      med_name="Hydroxyzine 25mg tablet",
+                      sig="Take 1 tablet by mouth twice daily as needed",
+                      qty=60, unit="tablets", refills=3, days_supply=30,
+                      classification="permanent_rx",
+                      pharmacy_id="pharm_001", pharmacy_name="CVS Pharmacy #4521")
+
+
+def solve_task_h22(state):
+    """Deny Omeprazole refill, discontinue, prescribe Pantoprazole."""
+    req = find_entity(state["refillRequests"], medicationName="Omeprazole 20mg capsule", status="pending")
+    req["status"] = "denied"
+    req["processedDate"] = NOW_ISO
+    req["processedBy"] = CURRENT_USER_NAME
+    req["denyReason"] = "Switching to a different medication"
+
+    _discontinue_med(state, "Omeprazole 20mg capsule", "permanentRxMeds",
+                     "I want to discontinue this medication",
+                     details="Switching to Pantoprazole")
+
+    _add_prescription(state,
+                      med_name="Pantoprazole 40mg tablet",
+                      sig="Take 1 tablet by mouth once daily before breakfast",
+                      qty=30, unit="tablets", refills=3, days_supply=30,
+                      classification="permanent_rx",
+                      pharmacy_id="pharm_001", pharmacy_name="CVS Pharmacy #4521",
+                      diagnosis=[{"code": "K21.0", "description": "Gastroesophageal reflux disease"}])
+
+
+def solve_task_h23(state):
+    """Med rec: discontinue Fish Oil, document Turmeric OTC."""
+    _discontinue_med(state, "Fish Oil 1000mg softgel", "permanentOtcMeds",
+                     "I want to discontinue this medication",
+                     details="Discontinued during medication reconciliation")
+    state["currentPatient"]["lastReconciledDate"] = NOW_ISO
+
+    pid = f"otc_{state['_nextOtcId']:03d}"
+    state["_nextOtcId"] += 1
+    state["permanentOtcMeds"].append({
+        "id": pid,
+        "medicationName": "Turmeric 500mg capsule",
+        "ndc": None,
+        "sig": "Take 1 capsule by mouth once daily with food",
+        "qty": 0,
+        "unit": "capsules",
+        "refills": 0,
+        "refillsRemaining": 0,
+        "daysSupply": 30,
+        "dispenseAsWritten": False,
+        "status": "active",
+        "classification": "permanent_otc",
+        "prescriberId": None,
+        "prescriberName": None,
+        "pharmacyId": None,
+        "pharmacyName": None,
+        "startDate": NOW_DATE,
+        "lastPrescribedDate": None,
+        "documentedDate": NOW_DATE,
+        "diagnosis": [],
+        "isControlled": False,
+        "scheduleClass": None
+    })
+
+
+def solve_task_h24(state):
+    """Discontinue ARB (Losartan) with cancellation."""
+    _discontinue_med(state, "Losartan 50mg tablet", "permanentRxMeds",
+                     "I want to discontinue this medication",
+                     send_cancel=True)
+
+
+def solve_task_h25(state):
+    """Delete oral capsule custom sigs."""
+    capsule_sigs = [
+        "Take 1 capsule by mouth once daily",
+        "Take 1 capsule by mouth twice daily",
+        "Take 1 capsule by mouth three times daily",
+        "Take 1 capsule by mouth once daily before breakfast",
+    ]
+    for sig_text in capsule_sigs:
+        remove_entity(state["customSigs"], text=sig_text)
+
+
+def solve_task_h26(state):
+    """Approve Atorvastatin refill, create Rosuvastatin template."""
+    req = find_entity(state["refillRequests"], medicationName="Atorvastatin 20mg tablet", status="pending")
+    req["status"] = "approved"
+    req["processedDate"] = NOW_ISO
+    req["processedBy"] = CURRENT_USER_NAME
+    med = find_entity(state["permanentRxMeds"], medicationName="Atorvastatin 20mg tablet")
+    med["lastPrescribedDate"] = NOW_DATE
+
+    tid = f"tpl_{state['_nextTplId']:03d}"
+    state["_nextTplId"] += 1
+    state["rxTemplates"].append({
+        "id": tid,
+        "medicationName": "Rosuvastatin 10mg tablet",
+        "sig": "Take 1 tablet by mouth at bedtime",
+        "qty": 30,
+        "unit": "tablets",
+        "refills": 5,
+        "daysSupply": 30,
+        "ndc": None,
+        "createdDate": NOW_DATE
+    })
+
+
+def solve_task_h27(state):
+    """Approve Metoprolol (beta-blocker) refill with sig modification."""
+    req = find_entity(state["refillRequests"], medicationName="Metoprolol Succinate ER 50mg tablet", status="pending")
+    req["status"] = "approved"
+    req["processedDate"] = NOW_ISO
+    req["processedBy"] = CURRENT_USER_NAME
+    req["modifications"] = {"sig": "Take 1 tablet by mouth once daily in the morning"}
+    med = find_entity(state["permanentRxMeds"], medicationName="Metoprolol Succinate ER 50mg tablet")
+    med["sig"] = "Take 1 tablet by mouth once daily in the morning"
+    med["lastPrescribedDate"] = NOW_DATE
+
+
+def solve_task_h28(state):
+    """Add Tramadol allergy, set drug alerts to Major only."""
+    state["currentPatient"]["allergies"].append({
+        "id": f"alg_{state['_nextAlgId']:03d}",
+        "allergen": "Tramadol",
+        "reaction": "Seizures",
+        "severity": "Severe",
+        "type": "drug",
+        "onsetDate": NOW_DATE,
+        "source": "provider-entered"
+    })
+    state["_nextAlgId"] += 1
+    state["settings"]["drugDecisionSupport"]["drugToDrugLevel"] = "major_only"
+
+
+def solve_task_h29(state):
+    """Approve Walgreens refill (Sertraline) with refills=11, change default pharmacy."""
+    req = find_entity(state["refillRequests"], medicationName="Sertraline 50mg tablet", status="pending")
+    req["status"] = "approved"
+    req["processedDate"] = NOW_ISO
+    req["processedBy"] = CURRENT_USER_NAME
+    req["modifications"] = {"refills": 11}
+    med = find_entity(state["permanentRxMeds"], medicationName="Sertraline 50mg tablet")
+    med["refillsRemaining"] = 11
+    med["lastPrescribedDate"] = NOW_DATE
+    state["settings"]["defaultPharmacyId"] = "pharm_003"
+
+
+def solve_task_h30(state):
+    """Disc Prednisone+Amoxicillin, move Ciprofloxacin to permanent."""
+    _discontinue_med(state, "Prednisone 10mg tablet", "temporaryMeds",
+                     "I want to discontinue this medication",
+                     details="Patient completed the course")
+    _discontinue_med(state, "Amoxicillin 500mg capsule", "temporaryMeds",
+                     "I want to discontinue this medication",
+                     details="Patient completed the course")
+    med = remove_entity(state["temporaryMeds"], medicationName="Ciprofloxacin 500mg tablet")
+    med["classification"] = "permanent_rx"
+    state["permanentRxMeds"].append(med)
+
+
+def solve_task_h31(state):
+    """Create Amlodipine 10mg template, delete 5mg template."""
+    tid = f"tpl_{state['_nextTplId']:03d}"
+    state["_nextTplId"] += 1
+    state["rxTemplates"].append({
+        "id": tid,
+        "medicationName": "Amlodipine 10mg tablet",
+        "sig": "Take 1 tablet by mouth once daily",
+        "qty": 30,
+        "unit": "tablets",
+        "refills": 3,
+        "daysSupply": 30,
+        "ndc": None,
+        "createdDate": NOW_DATE
+    })
+    remove_entity(state["rxTemplates"], medicationName="Amlodipine 5mg tablet")
+
+
+def solve_task_h32(state):
+    """Discontinue DAW Losartan, prescribe replacement without DAW."""
+    losartan = find_entity(state["permanentRxMeds"], medicationName="Losartan 50mg tablet")
+    orig_sig = losartan["sig"]
+    _discontinue_med(state, "Losartan 50mg tablet", "permanentRxMeds",
+                     "I want to discontinue this medication")
+    _add_prescription(state,
+                      med_name="Losartan 50mg tablet",
+                      sig=orig_sig,
+                      qty=30, unit="tablets", refills=3, days_supply=30,
+                      classification="permanent_rx",
+                      pharmacy_id="pharm_003", pharmacy_name="Walgreens #7892",
+                      diagnosis=[{"code": "I10", "description": "Essential hypertension"}])
+
+
+def solve_task_h33(state):
+    """Set alerts to Major only, disable cost estimates, prescribe Cyclobenzaprine."""
+    state["settings"]["drugDecisionSupport"]["drugToDrugLevel"] = "major_only"
+    state["settings"]["showCostEstimates"] = False
+    _add_prescription(state,
+                      med_name="Cyclobenzaprine 10mg tablet",
+                      sig="Take 1 tablet by mouth three times daily",
+                      qty=30, unit="tablets", refills=1, days_supply=10,
+                      classification="permanent_rx",
+                      pharmacy_id="pharm_001", pharmacy_name="CVS Pharmacy #4521",
+                      diagnosis=[{"code": "M54.5", "description": "Chronic low back pain"}])
+
+
+def solve_task_h34(state):
+    """Approve Sertraline refill (Walgreens anxiety med), discontinue Losartan (Walgreens other provider)."""
+    req = find_entity(state["refillRequests"], medicationName="Sertraline 50mg tablet", status="pending")
+    req["status"] = "approved"
+    req["processedDate"] = NOW_ISO
+    req["processedBy"] = CURRENT_USER_NAME
+    med = find_entity(state["permanentRxMeds"], medicationName="Sertraline 50mg tablet")
+    med["lastPrescribedDate"] = NOW_DATE
+
+    _discontinue_med(state, "Losartan 50mg tablet", "permanentRxMeds",
+                     "Discontinued by another prescriber")
+
+
+def solve_task_h35(state):
+    """Remove Penicillin allergy, prescribe Amoxicillin 875mg temporary."""
+    remove_entity(state["currentPatient"]["allergies"], allergen="Penicillin")
+    _add_prescription(state,
+                      med_name="Amoxicillin 875mg capsule",
+                      sig="Take 1 capsule by mouth twice daily for 10 days",
+                      qty=20, unit="capsules", refills=0, days_supply=10,
+                      classification="temporary",
+                      pharmacy_id="pharm_001", pharmacy_name="CVS Pharmacy #4521",
+                      diagnosis=[{"code": "J01.90", "description": "Acute sinusitis, unspecified"}])
+
+
+def solve_task_h36(state):
+    """Delete templates for non-current permanent Rx meds."""
+    to_delete = [
+        "Lisinopril 20mg tablet",
+        "Metformin 1000mg tablet",
+        "Atorvastatin 40mg tablet",
+        "Amoxicillin 500mg capsule",
+        "Azithromycin 250mg tablet (Z-Pack)",
+        "Prednisone 10mg tablet (taper)",
+    ]
+    for name in to_delete:
+        remove_entity(state["rxTemplates"], medicationName=name)
+
+
+def solve_task_h37(state):
+    """Approve Gabapentin refill (has notes), deny all others."""
+    # Gabapentin has notes — approve
+    req = find_entity(state["refillRequests"], medicationName="Gabapentin 300mg capsule", status="pending")
+    req["status"] = "approved"
+    req["processedDate"] = NOW_ISO
+    req["processedBy"] = CURRENT_USER_NAME
+    med = find_entity(state["permanentRxMeds"], medicationName="Gabapentin 300mg capsule")
+    med["lastPrescribedDate"] = NOW_DATE
+
+    # All others have no notes — deny
+    deny_reason = "Routine refill — schedule office visit for renewal"
+    for med_name in ["Lisinopril 10mg tablet", "Atorvastatin 20mg tablet",
+                     "Omeprazole 20mg capsule", "Sertraline 50mg tablet",
+                     "Metoprolol Succinate ER 50mg tablet"]:
+        r = find_entity(state["refillRequests"], medicationName=med_name, status="pending")
+        r["status"] = "denied"
+        r["processedDate"] = NOW_ISO
+        r["processedBy"] = CURRENT_USER_NAME
+        r["denyReason"] = deny_reason
+
+
+def solve_task_h38(state):
+    """Remove Sulfonamides allergy, prescribe TMP-SMX temporary."""
+    remove_entity(state["currentPatient"]["allergies"], allergen="Sulfonamides")
+    _add_prescription(state,
+                      med_name="Trimethoprim-Sulfamethoxazole 800mg/160mg tablet",
+                      sig="Take 1 tablet by mouth twice daily for 7 days",
+                      qty=14, unit="tablets", refills=0, days_supply=7,
+                      classification="temporary",
+                      pharmacy_id="pharm_001", pharmacy_name="CVS Pharmacy #4521",
+                      diagnosis=[{"code": "N39.0", "description": "Urinary tract infection"}])
+
+
+def solve_task_h39(state):
+    """Change default to Express Scripts, document Magnesium OTC."""
+    state["settings"]["defaultPharmacyId"] = "pharm_011"
+
+    pid = f"otc_{state['_nextOtcId']:03d}"
+    state["_nextOtcId"] += 1
+    state["permanentOtcMeds"].append({
+        "id": pid,
+        "medicationName": "Magnesium Citrate 400mg tablet",
+        "ndc": None,
+        "sig": "Take 1 tablet by mouth once daily at bedtime",
+        "qty": 0,
+        "unit": "tablets",
+        "refills": 0,
+        "refillsRemaining": 0,
+        "daysSupply": 30,
+        "dispenseAsWritten": False,
+        "status": "active",
+        "classification": "permanent_otc",
+        "prescriberId": None,
+        "prescriberName": None,
+        "pharmacyId": None,
+        "pharmacyName": None,
+        "startDate": NOW_DATE,
+        "lastPrescribedDate": None,
+        "documentedDate": NOW_DATE,
+        "diagnosis": [],
+        "isControlled": False,
+        "scheduleClass": None
+    })
+
+
+def solve_task_h40(state):
+    """Transfer Metformin to Express Scripts mail-order."""
+    metformin = find_entity(state["permanentRxMeds"], medicationName="Metformin 500mg tablet")
+    orig_sig = metformin["sig"]
+    _discontinue_med(state, "Metformin 500mg tablet", "permanentRxMeds",
+                     "I want to discontinue this medication",
+                     details="Transferring to mail-order pharmacy")
+    _add_prescription(state,
+                      med_name="Metformin 500mg tablet",
+                      sig=orig_sig,
+                      qty=180, unit="tablets", refills=5, days_supply=90,
+                      classification="permanent_rx",
+                      pharmacy_id="pharm_011",
+                      pharmacy_name="Express Scripts Mail Pharmacy",
+                      diagnosis=[{"code": "E11.9", "description": "Type 2 diabetes mellitus"}])
+
+
 # ──────────────────────────────────────────────
 # Solve dispatch
 # ──────────────────────────────────────────────
@@ -909,6 +1245,14 @@ SOLVE_MAP = {
     "task_h13": solve_task_h13, "task_h14": solve_task_h14, "task_h15": solve_task_h15,
     "task_h16": solve_task_h16, "task_h17": solve_task_h17, "task_h18": solve_task_h18,
     "task_h19": solve_task_h19, "task_h20": solve_task_h20,
+
+    "task_h21": solve_task_h21, "task_h22": solve_task_h22, "task_h23": solve_task_h23,
+    "task_h24": solve_task_h24, "task_h25": solve_task_h25, "task_h26": solve_task_h26,
+    "task_h27": solve_task_h27, "task_h28": solve_task_h28, "task_h29": solve_task_h29,
+    "task_h30": solve_task_h30, "task_h31": solve_task_h31, "task_h32": solve_task_h32,
+    "task_h33": solve_task_h33, "task_h34": solve_task_h34, "task_h35": solve_task_h35,
+    "task_h36": solve_task_h36, "task_h37": solve_task_h37, "task_h38": solve_task_h38,
+    "task_h39": solve_task_h39, "task_h40": solve_task_h40,
 }
 
 

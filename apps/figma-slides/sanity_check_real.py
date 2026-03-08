@@ -1126,9 +1126,302 @@ def solve_task_h60(state):
                 obj["fontWeight"] = 700
 
 
+def solve_task_h61(state):
+    """Group-based transition standardization."""
+    for s in state["slides"]:
+        group = s.get("groupName")
+        if group == "Q3 Review":
+            s["transition"] = {
+                "type": "smart_animate", "direction": None,
+                "easing": "ease_in_out", "duration": 500, "timing": "immediately"
+            }
+        elif group == "Q4 Planning":
+            s["transition"] = {
+                "type": "push", "direction": "left",
+                "easing": "spring", "duration": 600, "timing": "immediately"
+            }
+        elif group == "Team Updates":
+            s["transition"] = {
+                "type": "move_in", "direction": "bottom",
+                "easing": "bounce", "duration": 400, "timing": "immediately"
+            }
+        else:
+            s["transition"] = {
+                "type": "dissolve", "direction": None,
+                "easing": "ease", "duration": 400, "timing": "immediately"
+            }
+
+
+def solve_task_h62(state):
+    """Alignment survey confidence <= 3 -> Viewer; hide poll + alignment results."""
+    low_confidence_ids = set()
+    for s in state["slides"]:
+        if s["title"] == "Team Survey Results":
+            for obj in s["objects"]:
+                if obj.get("type") == "liveInteraction":
+                    if obj.get("interactionType") == "alignment":
+                        for resp in obj.get("responses", []):
+                            if resp.get("value", 10) <= 3:
+                                low_confidence_ids.add(resp["userId"])
+                    obj["hideResults"] = True
+            break
+
+    for c in state["collaborators"]:
+        if c["id"] in low_confidence_ids:
+            c["role"] = "Viewer"
+
+
+def solve_task_h63(state):
+    """Append ' [REVIEW]' to slides with unresolved comments; resolve all."""
+    slides_with_unresolved = set()
+    for c in state["comments"]:
+        if c.get("resolved") is not True:
+            slides_with_unresolved.add(c["slideId"])
+
+    for s in state["slides"]:
+        if s["id"] in slides_with_unresolved:
+            s["title"] = s["title"] + " [REVIEW]"
+
+    for c in state["comments"]:
+        c["resolved"] = True
+
+
+def solve_task_h64(state):
+    """Swap HIGH and LOW risk card fills."""
+    slide = find_slide(state, "Key Risks & Mitigations")
+    risk1 = find_object(slide, "Risk 1")
+    risk3 = find_object(slide, "Risk 3")
+    risk1["fill"], risk3["fill"] = risk3["fill"], risk1["fill"]
+
+
+def solve_task_h65(state):
+    """Animated slides -> gradient bg; non-animated -> solid #2C2C2C."""
+    import copy
+    gradient_bg = {
+        "type": "gradient",
+        "gradient": {
+            "type": "linear",
+            "angle": 180,
+            "stops": [
+                {"color": "#0A0A2A", "position": 0},
+                {"color": "#1E1E1E", "position": 100}
+            ]
+        }
+    }
+    solid_bg = {"type": "solid", "color": "#2C2C2C"}
+
+    for s in state["slides"]:
+        has_anim = any(
+            obj.get("animation") is not None for obj in s.get("objects", [])
+        )
+        s["background"] = copy.deepcopy(gradient_bg) if has_anim else dict(solid_bg)
+
+
+def solve_task_h66(state):
+    """Largest team (Team A, 8 eng) -> gold stroke; smallest (Team C, 4 eng) -> fill."""
+    slide = find_slide(state, "Resource Allocation")
+    team_a = find_object(slide, "Team A Card")
+    team_a["stroke"]["color"] = "#F7C948"
+    team_c = find_object(slide, "Team C Card")
+    team_c["fill"] = "#1A1A2E"
+
+
+def solve_task_h67(state):
+    """Hide all live interactions; dissolve 800ms on affected slides."""
+    affected_slide_ids = set()
+    for s in state["slides"]:
+        for obj in s["objects"]:
+            if obj.get("type") == "liveInteraction":
+                obj["visible"] = False
+                affected_slide_ids.add(s["id"])
+
+    for s in state["slides"]:
+        if s["id"] in affected_slide_ids:
+            s["transition"]["type"] = "dissolve"
+            s["transition"]["direction"] = None
+            s["transition"]["duration"] = 800
+
+
+def solve_task_h68(state):
+    """Shapes with stroke: +1 width. Shapes without: add {#404040, 1}."""
+    for s in state["slides"]:
+        for obj in s["objects"]:
+            if obj.get("type") == "shape":
+                stroke = obj.get("stroke")
+                if stroke and isinstance(stroke, dict) and "width" in stroke:
+                    stroke["width"] += 1
+                else:
+                    obj["stroke"] = {"color": "#404040", "width": 1}
+
+
+def solve_task_h69(state):
+    """Cross-reference adoption Q3 values into competitive table."""
+    comp_slide = find_slide(state, "Competitive Landscape")
+    comp_table = find_object(comp_slide, "Comparison Table")
+    comp_table["cells"][1][1] = "Full (81%)"
+    comp_table["cells"][2][1] = "Native (41%)"
+
+
+def solve_task_h70(state):
+    """Q3 Review text objects: add fade 400ms if no anim; set duration 600ms if has."""
+    q3_titles = {"Q3 Highlights", "Growth Metrics", "Customer Feedback"}
+    for s in state["slides"]:
+        if s["title"] in q3_titles:
+            for obj in s["objects"]:
+                if obj.get("type") != "text":
+                    continue
+                if obj.get("animation") is None:
+                    obj["animation"] = {
+                        "style": "fade", "duration": 400,
+                        "timing": "after_previous", "direction": "in", "order": 0
+                    }
+                else:
+                    obj["animation"]["duration"] = 600
+
+
+def solve_task_h71(state):
+    """Unresolved commenters -> red avatar; resolved-only -> green avatar."""
+    has_unresolved = set()
+    has_comment = set()
+    for c in state["comments"]:
+        has_comment.add(c["userId"])
+        if c.get("resolved") is not True:
+            has_unresolved.add(c["userId"])
+    resolved_only = has_comment - has_unresolved
+
+    for c in state["collaborators"]:
+        if c["id"] in has_unresolved:
+            c["avatarColor"] = "#F24E1E"
+        elif c["id"] in resolved_only:
+            c["avatarColor"] = "#0ACF83"
+
+
+def solve_task_h72(state):
+    """title_content: center Title; section: Subtitle weight 600, size 24."""
+    for s in state["slides"]:
+        layout = s.get("layout", "")
+        if layout == "layout_title_content":
+            for obj in s["objects"]:
+                if obj["name"] == "Title":
+                    obj["textAlign"] = "center"
+                    break
+        elif layout == "layout_section":
+            for obj in s["objects"]:
+                if obj["name"] == "Section Subtitle":
+                    obj["fontWeight"] = 600
+                    obj["fontSize"] = 24
+                    break
+
+
+def solve_task_h73(state):
+    """Design System 2.0: remove animations, opacity 85 for pop, 90 for others."""
+    slide = find_slide(state, "Design System 2.0")
+    for obj in slide["objects"]:
+        anim = obj.get("animation")
+        if anim is not None:
+            if anim.get("style") == "pop":
+                obj["opacity"] = 85
+            else:
+                obj["opacity"] = 90
+            obj["animation"] = None
+
+
+def solve_task_h74(state):
+    """Notes 'Let Aiko take over' -> smart_animate; 'hiring timeline' -> skip."""
+    for s in state["slides"]:
+        notes = s.get("presenterNotes", "")
+        if "Let Aiko take over" in notes:
+            s["transition"] = {
+                "type": "smart_animate", "direction": None,
+                "easing": "ease_in_out", "duration": 600, "timing": "immediately"
+            }
+        if "hiring timeline" in notes:
+            s["skipped"] = True
+
+
+def solve_task_h75(state):
+    """Gradient/skipped -> disable slide numbers; others -> padded."""
+    for s in state["slides"]:
+        bg = s.get("background", {})
+        is_gradient = bg.get("type") == "gradient"
+        is_skipped = s.get("skipped") is True
+        if is_gradient or is_skipped:
+            s["slideNumberEnabled"] = False
+        else:
+            s["slideNumberEnabled"] = True
+            s["slideNumberFormat"] = "padded"
+
+
+def solve_task_h76(state):
+    """Update Accent colors per template; Corporate Blue Heading 2 size 28."""
+    accent_map = {"ts_001": "#FF6B35", "ts_002": "#F7C948", "ts_003": "#7B61FF"}
+    for ts in state["templateStyles"]:
+        ts_id = ts["id"]
+        if ts_id in accent_map:
+            for color in ts["colors"]:
+                if color["name"] == "Accent":
+                    color["value"] = accent_map[ts_id]
+                    break
+        if ts_id == "ts_002":
+            for text_style in ts["textStyles"]:
+                if text_style["name"] == "Heading 2":
+                    text_style["fontSize"] = 28
+                    break
+
+
+def solve_task_h77(state):
+    """Normalize: ease_in_out everywhere; directional 500ms; directionless 400ms."""
+    directional = {"push", "slide_in", "slide_out", "move_in", "move_out"}
+    directionless = {"dissolve", "smart_animate"}
+    for s in state["slides"]:
+        trans = s["transition"]
+        trans["easing"] = "ease_in_out"
+        t_type = trans.get("type", "none")
+        if t_type in directional:
+            trans["duration"] = 500
+        elif t_type in directionless:
+            trans["duration"] = 400
+
+
+def solve_task_h78(state):
+    """Largest group (Q4 Planning) -> Corporate Blue + Plus Jakarta Sans titles."""
+    q4_planning_titles = {
+        "Q4 Roadmap", "Design System 2.0", "API Reference",
+        "Team Survey Results", "Data Comparison"
+    }
+    for s in state["slides"]:
+        if s["title"] in q4_planning_titles:
+            s["templateStyle"] = "ts_002"
+            for obj in s["objects"]:
+                if obj["name"] == "Title":
+                    obj["fontFamily"] = "Plus Jakarta Sans"
+
+
+def solve_task_h79(state):
+    """Highest Target Q4 feature -> 'Market Leader' in competitive; target to 95%."""
+    adoption_slide = find_slide(state, "Data Comparison")
+    adoption_table = find_object(adoption_slide, "Adoption Table")
+    adoption_table["cells"][1][4] = "95%"
+
+    comp_slide = find_slide(state, "Competitive Landscape")
+    comp_table = find_object(comp_slide, "Comparison Table")
+    comp_table["cells"][1][1] = "Market Leader"
+
+
+def solve_task_h80(state):
+    """Adoption table: cells ending in '0%' -> end in '5%'."""
+    slide = find_slide(state, "Data Comparison")
+    table = find_object(slide, "Adoption Table")
+    for r in range(1, len(table["cells"])):
+        for c in range(len(table["cells"][r])):
+            val = table["cells"][r][c]
+            if val.endswith("0%"):
+                table["cells"][r][c] = val[:-2] + "5%"
+
+
 SOLVERS = {}
 for _difficulty in ("e", "m", "h"):
-    for _i in range(1, 61):
+    for _i in range(1, 81):
         _task_id = f"task_{_difficulty}{_i}"
         _fn_name = f"solve_task_{_difficulty}{_i}"
         if _fn_name in globals():

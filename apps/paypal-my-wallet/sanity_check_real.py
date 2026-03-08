@@ -896,13 +896,165 @@ def solve_task_h40(state):
         offer["savedAt"] = now_iso()
 
 
+# ---- HARDENING ROUND 2 ----
+
+def solve_task_h41(state):
+    """Sell $50 of best-performing crypto (BTC, 60.22%), deposit $50 to savings."""
+    sell_crypto(state, "BTC", 50)
+    deposit_to_savings(state, 50)
+
+
+def solve_task_h42(state):
+    """Set preferred payment to only confirmed debit card (MC 7156, card_002)."""
+    for c in state["cards"]:
+        c["isPreferred"] = False
+    card = find_card(state, "7156")
+    card["isPreferred"] = True
+    state["walletPreferences"]["preferredPaymentMethod"] = card["id"]
+    state["currentUser"]["preferredPaymentMethodId"] = card["id"]
+
+
+def solve_task_h43(state):
+    """Deposit partially-used gift card balance ($12.50 Starbucks) into savings."""
+    deposit_to_savings(state, 12.50)
+
+
+def solve_task_h44(state):
+    """Save all available offers with percentage-based cashback >= 10%."""
+    for offer in state["offers"]:
+        if (offer.get("status") == "available"
+                and offer.get("cashbackType") == "percent"
+                and offer.get("cashbackPercent", 0) >= 10):
+            offer["status"] = "saved"
+            offer["savedAt"] = now_iso()
+
+
+def solve_task_h45(state):
+    """Withdraw credit minimum ($35) from savings, pay the minimum."""
+    withdraw_from_savings(state, 35)
+    make_credit_payment(state, 35)
+
+
+def solve_task_h46(state):
+    """Remove unconfirmed checking account (Wells Fargo 5518)."""
+    state["bankAccounts"] = [
+        b for b in state["bankAccounts"]
+        if not (b.get("lastFour") == "5518" and b.get("status") == "pending_confirmation")
+    ]
+
+
+def solve_task_h47(state):
+    """Withdraw $1000 from savings, convert $500 to EUR, buy $500 BTC."""
+    withdraw_from_savings(state, 1000)
+    convert_currency(state, "USD", "EUR", 500)
+    buy_crypto(state, "BTC", 500)
+
+
+def solve_task_h48(state):
+    """Sell $100 worst crypto (PYUSD, 0%), buy $100 best (BTC, 60.22%)."""
+    sell_crypto(state, "PYUSD", 100)
+    buy_crypto(state, "BTC", 100)
+
+
+def solve_task_h49(state):
+    """Send $50 Nike gift card to jamie@email.com, save DoorDash offer."""
+    purchase_gift_card(state, "Nike", 50, "jamie@email.com", "Jamie", "Great job!")
+    offer = find_offer(state, "DoorDash")
+    offer["status"] = "saved"
+    offer["savedAt"] = now_iso()
+
+
+def solve_task_h50(state):
+    """Add SEK, convert $200 to SEK, deposit $200 to savings."""
+    state["balances"].append({"currency": "SEK", "amount": 0, "isPrimary": False})
+    convert_currency(state, "USD", "SEK", 200)
+    deposit_to_savings(state, 200)
+
+
+def solve_task_h51(state):
+    """Pay half of credit balance rounded down ($622)."""
+    import math
+    half = math.floor(state["paypalCredit"]["currentBalance"] / 2)
+    make_credit_payment(state, half)
+
+
+def solve_task_h52(state):
+    """Buy $25 gift card from merchant with highest active gift card balance (Home Depot $75)."""
+    user_email = state["currentUser"]["email"]
+    user_name = f"{state['currentUser']['firstName']} {state['currentUser']['lastName']}"
+    purchase_gift_card(state, "Home Depot", 25, user_email, user_name, "")
+
+
+def solve_task_h53(state):
+    """Keep payments, transfers, security alerts on; turn off rest."""
+    notifs = state["walletPreferences"]["emailNotifications"]
+    notifs["payments"] = True
+    notifs["transfers"] = True
+    notifs["securityAlerts"] = True
+    notifs["promotions"] = False
+    notifs["cryptoAlerts"] = False
+    notifs["rewardsUpdates"] = False
+    notifs["weeklyDigest"] = False
+
+
+def solve_task_h54(state):
+    """Redeem 2000 rewards for balance, buy $10 Solana."""
+    redeem_rewards(state, 2000, "balance")
+    buy_crypto(state, "SOL", 10)
+
+
+def solve_task_h55(state):
+    """Remove credit cards not set as preferred or backup."""
+    state["cards"] = [
+        c for c in state["cards"]
+        if c.get("type") != "credit" or c.get("isPreferred") or c.get("isBackup")
+    ]
+
+
+def solve_task_h56(state):
+    """Add HKD, convert $250 to HKD, set ATM limit to 200."""
+    state["balances"].append({"currency": "HKD", "amount": 0, "isPrimary": False})
+    convert_currency(state, "USD", "HKD", 250)
+    state["paypalDebitCard"]["dailyATMLimit"] = 200
+
+
+def solve_task_h57(state):
+    """Buy $25 DoorDash gift card for self, sell $25 LTC."""
+    user_email = state["currentUser"]["email"]
+    user_name = f"{state['currentUser']['firstName']} {state['currentUser']['lastName']}"
+    purchase_gift_card(state, "DoorDash", 25, user_email, user_name, "")
+    sell_crypto(state, "LTC", 25)
+
+
+def solve_task_h58(state):
+    """Redeem 10% of rewards earned this year (2150 * 0.1 = 215) for balance."""
+    earned_this_year = state["rewards"]["earnedThisYear"]
+    points_to_redeem = int(earned_this_year * 0.1)
+    redeem_rewards(state, points_to_redeem, "balance")
+
+
+def solve_task_h59(state):
+    """Sell $100 ETH, sell $100 BTC, pay $200 on credit."""
+    sell_crypto(state, "ETH", 100)
+    sell_crypto(state, "BTC", 100)
+    make_credit_payment(state, 200)
+
+
+def solve_task_h60(state):
+    """Change cashback category to Groceries, buy $25 Uber gift card for self."""
+    state["paypalDebitCard"]["cashBackCategory"] = "Groceries"
+    user_email = state["currentUser"]["email"]
+    user_name = f"{state['currentUser']['firstName']} {state['currentUser']['lastName']}"
+    purchase_gift_card(state, "Uber", 25, user_email, user_name, "")
+
+
 # ---------------------------------------------------------------------------
 # Solver registry
 # ---------------------------------------------------------------------------
 
 SOLVERS = {}
 for _prefix in ("e", "m", "h"):
-    for _i in range(1, 41):
+    for _i in range(1, 61):
         _task_id = f"task_{_prefix}{_i}"
         _fn_name = f"solve_{_task_id}"
         if _fn_name in globals():

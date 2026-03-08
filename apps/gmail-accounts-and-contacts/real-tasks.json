@@ -598,5 +598,125 @@
     "difficulty": "hard",
     "instruction": "Enable contact changes notifications, disable security alerts, switch your two-factor method to SMS, change the contact sort setting to sort by email, and turn off email sync.",
     "verify": "real-tasks/task_h60.py"
+  },
+  {
+    "id": "task_h61",
+    "difficulty": "hard",
+    "instruction": "Find the contact whose notes mention handling 'vendor agreements and NDAs'. Change their company to 'Morrison Legal Group' and add the VIP Clients label.",
+    "verify": "real-tasks/task_h61.py"
+  },
+  {
+    "id": "task_h62",
+    "difficulty": "hard",
+    "instruction": "Check your delegates' added dates. Find the delegate who was added most recently, then update that person's contact entry to have the job title 'Principal Engineer'.",
+    "verify": "real-tasks/task_h62.py"
+  },
+  {
+    "id": "task_h63",
+    "difficulty": "hard",
+    "instruction": "Find the contact whose notes mention having your 'spare key for emergencies'. Star them, add the Family label, and change their phone number to '+1 (415) 555-9911'.",
+    "verify": "real-tasks/task_h63.py"
+  },
+  {
+    "id": "task_h64",
+    "difficulty": "hard",
+    "instruction": "Find all contacts with a birthday in July and add the VIP Clients label to each one who doesn't already have it.",
+    "verify": "real-tasks/task_h64.py"
+  },
+  {
+    "id": "task_h65",
+    "difficulty": "hard",
+    "instruction": "Set your recovery email to match your mother's email address and set your recovery phone to match your father's phone number.",
+    "verify": "real-tasks/task_h65.py"
+  },
+  {
+    "id": "task_h66",
+    "difficulty": "hard",
+    "instruction": "Find the contact described as a 'book club co-organizer' in their notes. Remove the Neighbors label from them and add VIP Clients instead.",
+    "verify": "real-tasks/task_h66.py"
+  },
+  {
+    "id": "task_h67",
+    "difficulty": "hard",
+    "instruction": "For every contact whose job title contains the word 'Director', add the VIP Clients label if they don't already have it.",
+    "verify": "real-tasks/task_h67.py"
+  },
+  {
+    "id": "task_h68",
+    "difficulty": "hard",
+    "instruction": "Find the contact whose notes mention 'office renovation'. Star them and add both the Friends and VIP Clients labels.",
+    "verify": "real-tasks/task_h68.py"
+  },
+  {
+    "id": "task_h69",
+    "difficulty": "hard",
+    "instruction": "For each contact with the VIP Clients label: if they are currently starred, also add the Emergency label. If they are NOT starred, star them.",
+    "verify": "real-tasks/task_h69.py"
+  },
+  {
+    "id": "task_h70",
+    "difficulty": "hard",
+    "instruction": "Your best friend from college works at a specific company (check their contact notes). Find and delete any auto-saved contacts from that company.",
+    "verify": "real-tasks/task_h70.py"
+  },
+  {
+    "id": "task_h71",
+    "difficulty": "hard",
+    "instruction": "Find the contact whose secondary email is at the @cs.stanford.edu domain. Change their job title to 'Distinguished Professor' and add the VIP Clients label.",
+    "verify": "real-tasks/task_h71.py"
+  },
+  {
+    "id": "task_h72",
+    "difficulty": "hard",
+    "instruction": "You have three contacts at TechCorp. Star the Head of People Operations and unstar the Engineering Manager. Leave the VP of Product unchanged.",
+    "verify": "real-tasks/task_h72.py"
+  },
+  {
+    "id": "task_h73",
+    "difficulty": "hard",
+    "instruction": "Among the individual people in your other contacts (those with a first and last name), find the one who was saved most recently. Move them to your main contacts, set their company to 'Salesforce', job title to 'Account Executive', and add the Work label.",
+    "verify": "real-tasks/task_h73.py"
+  },
+  {
+    "id": "task_h74",
+    "difficulty": "hard",
+    "instruction": "Your personal trainer and your yoga instructor should both be in the Friends label. Remove the Gym Buddies label from both and add Friends if they don't already have it.",
+    "verify": "real-tasks/task_h74.py"
+  },
+  {
+    "id": "task_h75",
+    "difficulty": "hard",
+    "instruction": "Update your profile phone number to match the phone of your contact at FitnessFirst. Then turn off the auto-save contacts setting.",
+    "verify": "real-tasks/task_h75.py"
+  },
+  {
+    "id": "task_h76",
+    "difficulty": "hard",
+    "instruction": "Find the contact at Stanford University. Remove the College Alumni label and add both Work and VIP Clients.",
+    "verify": "real-tasks/task_h76.py"
+  },
+  {
+    "id": "task_h77",
+    "difficulty": "hard",
+    "instruction": "Create a new contact named 'Hiro Tanaka' with email 'hiro.tanaka@gmail.com'. Then look up which labels Yuki Tanaka has and add those same labels to Hiro's contact.",
+    "verify": "real-tasks/task_h77.py"
+  },
+  {
+    "id": "task_h78",
+    "difficulty": "hard",
+    "instruction": "Find the contact whose notes mention 'AWS re:Invent 2024'. Add the College Alumni label and update their address to '500 Tech Park Dr, Menlo Park, CA 94025'.",
+    "verify": "real-tasks/task_h78.py"
+  },
+  {
+    "id": "task_h79",
+    "difficulty": "hard",
+    "instruction": "Find the contact whose notes mention 'property search in East Bay'. Add them as a new delegate and give their contact the VIP Clients label.",
+    "verify": "real-tasks/task_h79.py"
+  },
+  {
+    "id": "task_h80",
+    "difficulty": "hard",
+    "instruction": "Unstar every contact who has exactly one label assigned. Then star every contact who has three or more labels and is not already starred.",
+    "verify": "real-tasks/task_h80.py"
   }
 ]

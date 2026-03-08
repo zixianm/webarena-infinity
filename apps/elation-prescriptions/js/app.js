@@ -1047,6 +1047,14 @@ const App = {
             if (target.id === 'rxRefills') AppState.prescribeFormData.refills = target.value;
             if (target.id === 'rxDaysSupply') AppState.prescribeFormData.daysSupply = target.value;
             if (target.id === 'rxInstructions') AppState.prescribeFormData.instructionsToPharmacy = target.value;
+
+            // Update submit/template button disabled state without full re-render
+            const fd = AppState.prescribeFormData;
+            const canSubmit = fd.medicationName && fd.sig && fd.qty;
+            const submitBtn = document.querySelector('[data-action="submit-prescribe"]');
+            const templateBtn = document.querySelector('[data-action="save-as-template"]');
+            if (submitBtn) submitBtn.disabled = !canSubmit;
+            if (templateBtn) templateBtn.disabled = !canSubmit;
         }
     },
 

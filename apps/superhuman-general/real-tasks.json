@@ -358,5 +358,125 @@
     "difficulty": "hard",
     "instruction": "Move all emails labeled 'Travel' to Done.",
     "verify": "real-tasks/task_h20.py"
+  },
+  {
+    "id": "task_h21",
+    "difficulty": "hard",
+    "instruction": "Reply to the CloudScale contract email and CC the attorney who sent the vendor agreement about CloudScale.",
+    "verify": "real-tasks/task_h21.py"
+  },
+  {
+    "id": "task_h22",
+    "difficulty": "hard",
+    "instruction": "Trash the sprint retrospective email from the person who organized the Sprint Planning calendar event.",
+    "verify": "real-tasks/task_h22.py"
+  },
+  {
+    "id": "task_h23",
+    "difficulty": "hard",
+    "instruction": "Add the 'Urgent' label to all emails in your inbox that have attachments.",
+    "verify": "real-tasks/task_h23.py"
+  },
+  {
+    "id": "task_h24",
+    "difficulty": "hard",
+    "instruction": "Create a calendar event titled 'Client Review' on March 11 from 2pm to 3pm on Zoom. Invite the senders of the inbox emails labeled 'Clients'.",
+    "verify": "real-tasks/task_h24.py"
+  },
+  {
+    "id": "task_h25",
+    "difficulty": "hard",
+    "instruction": "Create a shared snippet called 'Contract Follow-up' with body: 'Hi {first_name}, please sign the {contract_name} contract by {deadline}. Thanks, Alex'. Delete the Scheduling Request snippet and stop sharing the [Sales] Product Demo snippet.",
+    "verify": "real-tasks/task_h25.py"
+  },
+  {
+    "id": "task_h26",
+    "difficulty": "hard",
+    "instruction": "Move all starred emails from Done back to the inbox.",
+    "verify": "real-tasks/task_h26.py"
+  },
+  {
+    "id": "task_h27",
+    "difficulty": "hard",
+    "instruction": "Create a label called 'External Partners' with an orange color and apply it to all inbox emails from DesignHub, FinancePlus, and CloudScale.",
+    "verify": "real-tasks/task_h27.py"
+  },
+  {
+    "id": "task_h28",
+    "difficulty": "hard",
+    "instruction": "Create a new booking page called 'Board Prep' — 90 minutes on Zoom, available Tuesday and Thursday from 9am to 12pm. Then deactivate the Chat with Alex booking page.",
+    "verify": "real-tasks/task_h28.py"
+  },
+  {
+    "id": "task_h29",
+    "difficulty": "hard",
+    "instruction": "Delete all snippets that have a response rate below 30%.",
+    "verify": "real-tasks/task_h29.py"
+  },
+  {
+    "id": "task_h30",
+    "difficulty": "hard",
+    "instruction": "Archive all reminder emails from people outside Acme Corp.",
+    "verify": "real-tasks/task_h30.py"
+  },
+  {
+    "id": "task_h31",
+    "difficulty": "hard",
+    "instruction": "Forward Sophie Laurent's EuroDesign Conference invitation to sarah.chen@acmecorp.com, then add the 'Work' label to it.",
+    "verify": "real-tasks/task_h31.py"
+  },
+  {
+    "id": "task_h32",
+    "difficulty": "hard",
+    "instruction": "Star the unread email from Tom Bradley and archive the other one from him in the inbox.",
+    "verify": "real-tasks/task_h32.py"
+  },
+  {
+    "id": "task_h33",
+    "difficulty": "hard",
+    "instruction": "Send a new email to Kevin Zhao and Ryan Cooper about the API integration project, with Sarah Chen on CC.",
+    "verify": "real-tasks/task_h33.py"
+  },
+  {
+    "id": "task_h34",
+    "difficulty": "hard",
+    "instruction": "Delete the 'Events' and 'Newsletters' labels entirely.",
+    "verify": "real-tasks/task_h34.py"
+  },
+  {
+    "id": "task_h35",
+    "difficulty": "hard",
+    "instruction": "Update the 'Chat with Alex' booking page: change the duration to 45 minutes and set availability to Monday through Friday, 10am to 4pm.",
+    "verify": "real-tasks/task_h35.py"
+  },
+  {
+    "id": "task_h36",
+    "difficulty": "hard",
+    "instruction": "Trash all emails in the Other inbox split that have the Engineering label.",
+    "verify": "real-tasks/task_h36.py"
+  },
+  {
+    "id": "task_h37",
+    "difficulty": "hard",
+    "instruction": "Find Sarah Chen's customer escalation email in Done, move it back to the inbox, and add the 'Work' label.",
+    "verify": "real-tasks/task_h37.py"
+  },
+  {
+    "id": "task_h38",
+    "difficulty": "hard",
+    "instruction": "Disable read receipt team sharing, switch auto reminders to manual mode, and set calendar alerts to 5 minutes before events.",
+    "verify": "real-tasks/task_h38.py"
+  },
+  {
+    "id": "task_h39",
+    "difficulty": "hard",
+    "instruction": "Create a label called 'Needs Response' with a purple color and apply it to all unread emails in the Important inbox split.",
+    "verify": "real-tasks/task_h39.py"
+  },
+  {
+    "id": "task_h40",
+    "difficulty": "hard",
+    "instruction": "Create a calendar event called 'Design Review Follow-up' on March 15 from 2pm to 3pm on Zoom. Invite all the attendees from the Design Review event on March 8.",
+    "verify": "real-tasks/task_h40.py"
   }
 ]

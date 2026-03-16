@@ -12,13 +12,13 @@ Mirror-Mirror is a scalable pipeline for auto-generating web-app testing environ
 
 ```bash
 # Single task (starts server automatically, results go to apps/<app>/results/)
-python evaluation/run_eval_parallel.py --model gemini --task-id task_e1 --workers 1 --web-app apps/linear-account-settings
+python evaluation/run_eval_parallel.py --model gemini-pro --task-id task_e1 --workers 1 --web-app apps/linear-account-settings
 
 # Filter by difficulty
 python evaluation/run_eval_parallel.py --model gpt --difficulty easy --workers 4 --web-app apps/linear-account-settings
 
 # Parallel evaluation against remote pre-running servers
-python evaluation/run_eval_parallel.py --model gemini --workers 8 \
+python evaluation/run_eval_parallel.py --model gemini-pro --workers 8 \
     --env-host ec2-host --base-port 8001 --web-app apps/linear-account-settings
 ```
 
@@ -36,13 +36,13 @@ Each environment runs as a self-contained pipeline on one EC2 instance (no SQS, 
 
 ```bash
 # Launch one EC2 instance per environment in manifest
-bash infra/setup/launch.sh --manifest infra/env_manifest.jsonl --model gemini
+bash infra/setup/launch.sh --manifest infra/env_manifest.jsonl --model gemini-pro
 
 # SSH into each instance, then:
 #   claude login
 #   claude plugins install frontend-design
 #   nohup python infra/pipeline.py --app-name <env_id> --docs-path <docs> \
-#     --model gemini --workers 8 > /tmp/mirror-mirror-logs/pipeline.log 2>&1 &
+#     --model gemini-pro --workers 8 > /tmp/mirror-mirror-logs/pipeline.log 2>&1 &
 
 # Monitor progress
 bash infra/setup/monitor.sh

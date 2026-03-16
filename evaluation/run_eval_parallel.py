@@ -18,10 +18,10 @@ Usage:
     python evaluation/run_eval_parallel.py --model claude --difficulty easy --workers 2
 
     # Multi-run: repeat full task set 3 times
-    python evaluation/run_eval_parallel.py --model gemini --repetitions 3 --workers 4
+    python evaluation/run_eval_parallel.py --model gemini-pro --repetitions 3 --workers 4
 
     # Multi-run cascading: run all, retry failures, retry remaining failures
-    python evaluation/run_eval_parallel.py --model gemini --repetitions 3 --failed-only --workers 4
+    python evaluation/run_eval_parallel.py --model gemini-pro --repetitions 3 --failed-only --workers 4
 """
 
 import argparse
@@ -79,8 +79,10 @@ def _make_kimi_agent(*, max_steps, timeout, headless, **_kw):
 AGENT_FACTORIES = {
     "gpt": lambda **kw: _make_browser_use_agent(
         lambda: __import__("browser_use.llm.openai.chat", fromlist=["ChatOpenAI"]).ChatOpenAI(model="gpt-4o"), **kw),
-    "gemini": lambda **kw: _make_browser_use_agent(
+    "gemini-flash": lambda **kw: _make_browser_use_agent(
         lambda: __import__("browser_use.llm.google.chat", fromlist=["ChatGoogle"]).ChatGoogle(model="gemini-3-flash-preview"), **kw),
+    "gemini-pro": lambda **kw: _make_browser_use_agent(
+        lambda: __import__("browser_use.llm.google.chat", fromlist=["ChatGoogle"]).ChatGoogle(model="gemini-3-pro-preview"), **kw),
     "claude": lambda **kw: _make_browser_use_agent(
         lambda: __import__("browser_use.llm.anthropic.chat", fromlist=["ChatAnthropic"]).ChatAnthropic(model="claude-sonnet-4-5-20250929"), **kw),
     "gemini-cu": lambda **kw: _make_gemini_cu_agent(**kw),

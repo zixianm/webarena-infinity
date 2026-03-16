@@ -310,4 +310,4 @@ fi
 echo ""
 echo "=== Done ==="
 echo "Use this AMI with launch.sh:"
-echo "  bash infra/setup/launch.sh --manifest infra/env_manifest.jsonl --ami $AMI_ID --model gemini"
+echo "  bash infra/setup/launch.sh --manifest infra/env_manifest.jsonl --ami $AMI_ID --model gemini-pro"

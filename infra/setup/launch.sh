@@ -9,11 +9,11 @@
 #     GITHUB_TOKEN       — for git clone/push on EC2 instances
 #     KEY_PAIR_NAME      — your EC2 key pair name
 #     GOOGLE_API_KEY     — for Gemini eval agent (optional if using --model gpt)
-#     OPENAI_API_KEY     — for GPT eval agent (optional if using --model gemini)
+#     OPENAI_API_KEY     — for GPT eval agent (optional if using --model gemini-pro-pro/gemini-flash)
 #
 # Usage:
-#   bash infra/setup/launch.sh --manifest infra/env_manifest.jsonl --model gemini
-#   bash infra/setup/launch.sh --manifest infra/env_manifest.jsonl --ami ami-0abc123 --model gemini
+#   bash infra/setup/launch.sh --manifest infra/env_manifest.jsonl --model gemini-pro
+#   bash infra/setup/launch.sh --manifest infra/env_manifest.jsonl --ami ami-0abc123 --model gemini-pro
 #   bash infra/setup/launch.sh --manifest infra/env_manifest.jsonl --instance-type m5.2xlarge --key-pair my-key
 #   bash infra/setup/launch.sh --manifest infra/env_manifest.jsonl --model gpt --workers 8 --repetitions 5
 
@@ -27,7 +27,7 @@ set -a && source "$REPO_ROOT/.env" && set +a
 MANIFEST="infra/env_manifest.jsonl"
 INSTANCE_TYPE="m5.4xlarge"
 KEY_PAIR="${KEY_PAIR_NAME:-}"
-MODEL="gemini"
+MODEL="gemini-pro"
 WORKERS="8"
 REPETITIONS="3"
 MAX_ITERATIONS="3"

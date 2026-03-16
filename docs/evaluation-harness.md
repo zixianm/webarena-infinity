@@ -6,7 +6,7 @@
 ```bash
 python evaluation/run_eval.py --model gpt --task-id task_e1
 python evaluation/run_eval.py --model claude --difficulty easy
-python evaluation/run_eval.py --model gemini --use-vision
+python evaluation/run_eval.py --model gemini-pro --use-vision
 ```
 
 ### Parallel: `evaluation/run_eval_parallel.py`

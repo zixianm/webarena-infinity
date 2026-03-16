@@ -22,4 +22,4 @@ sudo uv run python -m playwright install-deps chromium
 
 echo ""
 echo "Setup complete. You can now run evaluations:"
-echo "  python evaluation/run_eval_parallel.py --model gemini --task-id task_e1 --workers 1 --web-app apps/<app>"
+echo "  python evaluation/run_eval_parallel.py --model gemini-pro --task-id task_e1 --workers 1 --web-app apps/<app>"

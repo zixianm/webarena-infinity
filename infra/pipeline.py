@@ -10,25 +10,25 @@ Usage:
     python infra/pipeline.py \\
         --app-name linear-account-settings \\
         --docs-path apps/user-manuals/linear/02-account \\
-        --model gemini --workers 4 --repetitions 3
+        --model gemini-pro --workers 4 --repetitions 3
 
     # Rerun from real task generation (cleans real-tasks, hardening, results)
     python infra/pipeline.py \\
         --app-name gmail \\
         --docs-path apps/user-manuals/gmail/ \\
-        --rerun-from phase_3a --model gemini --workers 2
+        --rerun-from phase_3a --model gemini-pro --workers 2
 
     # Rerun just the eval phases (cleans results only)
     python infra/pipeline.py \\
         --app-name gmail \\
         --docs-path apps/user-manuals/gmail/ \\
-        --rerun-from phase_2b --model gemini
+        --rerun-from phase_2b --model gemini-pro
 
     # Resume after a crash (picks up from saved state)
     python infra/pipeline.py \\
         --app-name gitlab-plan-and-track \\
         --docs-path apps/user-manuals/gitlab/plan-and-track/ \\
-        --model gemini --workers 8 --resume
+        --model gemini-pro --workers 8 --resume
 """
 
 from __future__ import annotations
@@ -811,9 +811,9 @@ def main() -> None:
     )
     parser.add_argument(
         "--model",
-        default="gemini",
-        choices=["gemini", "gpt", "claude"],
-        help="Eval agent model (default: gemini)",
+        default="gemini-pro",
+        choices=["gemini-flash", "gemini-pro", "gpt", "claude"],
+        help="Eval agent model (default: gemini-pro)",
     )
     parser.add_argument(
         "--workers",

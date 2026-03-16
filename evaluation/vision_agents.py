@@ -508,6 +508,18 @@ class GeminiComputerUseAgent(VisionAgentBase):
                 })
                 break
 
+            # Record step in history immediately (before executing actions)
+            # so partial progress survives timeout.
+            step_record = {
+                "model_output": {
+                    "current_state": {"thought": step_text},
+                    "action": [],
+                },
+                "result": [{"extracted_content": ""}],
+                "coordinates": [],
+            }
+            history.append(step_record)
+
             # Execute each function call
             actions_taken = []
             parsed_actions = []
@@ -535,15 +547,10 @@ class GeminiComputerUseAgent(VisionAgentBase):
                     )
                 )
 
-            # Record step in history — step_{step}.png is what model saw
-            history.append({
-                "model_output": {
-                    "current_state": {"thought": step_text},
-                    "action": [{a: ""} for a in actions_taken],
-                },
-                "result": [{"extracted_content": "; ".join(actions_taken)}],
-                "coordinates": parsed_actions,
-            })
+            # Update step record with action results
+            step_record["model_output"]["action"] = [{a: ""} for a in actions_taken]
+            step_record["result"] = [{"extracted_content": "; ".join(actions_taken)}]
+            step_record["coordinates"] = parsed_actions
 
 
         return {
@@ -750,6 +757,18 @@ class ClaudeComputerUseAgent(VisionAgentBase):
                 })
                 break
 
+            # Record step in history immediately (before executing actions)
+            # so partial progress survives timeout.
+            step_record = {
+                "model_output": {
+                    "current_state": {"thought": step_text},
+                    "action": [],
+                },
+                "result": [{"extracted_content": ""}],
+                "coordinates": [],
+            }
+            history.append(step_record)
+
             # Execute each tool use
             parsed_actions = []
             actions_taken = []
@@ -796,15 +815,10 @@ class ClaudeComputerUseAgent(VisionAgentBase):
                     "content": [],  # will be filled with screenshot next iteration
                 })
 
-            # Record step in history — step_{step}.png is what model saw
-            history.append({
-                "model_output": {
-                    "current_state": {"thought": step_text},
-                    "action": [{a: ""} for a in actions_taken],
-                },
-                "result": [{"extracted_content": "; ".join(actions_taken)}],
-                "coordinates": parsed_actions,
-            })
+            # Update step record with action results
+            step_record["model_output"]["action"] = [{a: ""} for a in actions_taken]
+            step_record["result"] = [{"extracted_content": "; ".join(actions_taken)}]
+            step_record["coordinates"] = parsed_actions
 
             # If stop_reason is not tool_use, Claude is done
             if response.stop_reason != "tool_use":
@@ -1179,6 +1193,18 @@ class KimiVisionAgent(VisionAgentBase):
                 })
                 break
 
+            # Record step in history immediately (before executing actions)
+            # so partial progress survives timeout.
+            step_record = {
+                "model_output": {
+                    "current_state": {"thought": thought},
+                    "action": [{action_desc: ""}] if action_desc else [{"code": str(actions)}],
+                },
+                "result": [{"extracted_content": action_desc or str(actions)}],
+                "coordinates": [],
+            }
+            history.append(step_record)
+
             # Convert coordinates and execute
             actions = self._convert_relative_coords(actions)
             for action in actions:
@@ -1191,15 +1217,8 @@ class KimiVisionAgent(VisionAgentBase):
             observations.append(screenshot)
             cots.append({"thought": thought, "action": action_desc})
 
-            # Record step with coordinate data for report visualization
-            history.append({
-                "model_output": {
-                    "current_state": {"thought": thought},
-                    "action": [{action_desc: ""}] if action_desc else [{"code": str(actions)}],
-                },
-                "result": [{"extracted_content": action_desc or str(actions)}],
-                "coordinates": actions,
-            })
+            # Update step record with executed coordinates
+            step_record["coordinates"] = actions
 
         return {
             "steps": len(history),

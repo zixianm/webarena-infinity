@@ -9,10 +9,10 @@
 #     GITHUB_TOKEN       — for git clone/push on EC2 instances
 #     KEY_PAIR_NAME      — your EC2 key pair name
 #     GOOGLE_API_KEY     — for Gemini eval agent (optional if using --model gpt)
-#     OPENAI_API_KEY     — for GPT eval agent (optional if using --model gemini-pro-pro/gemini-flash)
+#     OPENAI_API_KEY     — for GPT eval agent (optional if using --model gemini-flash/gemini-pro)
 #
 # Usage:
-#   bash infra/setup/launch.sh --manifest infra/env_manifest.jsonl --model gemini-pro
+#   bash infra/setup/launch.sh --manifest infra/env_manifest.jsonl --model gemini-flash
 #   bash infra/setup/launch.sh --manifest infra/env_manifest.jsonl --ami ami-0abc123 --model gemini-pro
 #   bash infra/setup/launch.sh --manifest infra/env_manifest.jsonl --instance-type m5.2xlarge --key-pair my-key
 #   bash infra/setup/launch.sh --manifest infra/env_manifest.jsonl --model gpt --workers 8 --repetitions 5
@@ -27,7 +27,7 @@ set -a && source "$REPO_ROOT/.env" && set +a
 MANIFEST="infra/env_manifest.jsonl"
 INSTANCE_TYPE="m5.4xlarge"
 KEY_PAIR="${KEY_PAIR_NAME:-}"
-MODEL="gemini-pro"
+MODEL="gemini-flash"
 WORKERS="8"
 REPETITIONS="3"
 MAX_ITERATIONS="3"
@@ -237,27 +237,32 @@ fi
 # Hides other apps and irrelevant product docs so Claude stays focused.
 REPO=/home/ec2-user/mirror-mirror
 REFERENCE_APP="gitlab-org-management"
+# Derive docs parent dir (e.g. "user-manuals" or "app-description") from docs_path
+DOCS_PARENT=\$(echo "${docs_path}" | cut -d'/' -f2)
 PRODUCT=\$(echo "${docs_path}" | cut -d'/' -f3)
 
 {
   echo "# Auto-generated — local only, not committed"
   echo "# Hides irrelevant apps and docs for env: ${env_id}"
   echo ""
-  echo "# Other apps (keep reference + this env)"
+  echo "# Other apps (keep reference, docs source dir, and this env)"
   for app_dir in \$REPO/apps/*/; do
     app_name=\$(basename "\$app_dir")
     [ "\$app_name" = "\$REFERENCE_APP" ] && continue
-    [ "\$app_name" = "user-manuals" ] && continue
+    [ "\$app_name" = "\$DOCS_PARENT" ] && continue
     [ "\$app_name" = "${env_id}" ] && continue
     echo "apps/\$app_name/"
   done
   echo ""
-  echo "# Other product docs (keep \$PRODUCT)"
-  for product_dir in \$REPO/apps/user-manuals/*/; do
-    pname=\$(basename "\$product_dir")
-    [ "\$pname" = "\$PRODUCT" ] && continue
-    echo "apps/user-manuals/\$pname/"
-  done
+  echo "# Other product docs within \$DOCS_PARENT (keep \$PRODUCT)"
+  if [ -d "\$REPO/apps/\$DOCS_PARENT" ]; then
+    for product_dir in \$REPO/apps/\$DOCS_PARENT/*/; do
+      [ ! -d "\$product_dir" ] && continue
+      pname=\$(basename "\$product_dir")
+      [ "\$pname" = "\$PRODUCT" ] && continue
+      echo "apps/\$DOCS_PARENT/\$pname/"
+    done
+  fi
 } > \$REPO/.claudeignore
 
 # Tell git to ignore .claudeignore itself (never track it)

@@ -5,7 +5,7 @@
 # Prerequisites: same as launch.sh (GITHUB_TOKEN, KEY_PAIR_NAME, etc.)
 #
 # Usage:
-#   bash infra/setup/run_batches.sh --manifest infra/env_manifest.jsonl --batch-size 3 --model gemini
+#   bash infra/setup/run_batches.sh --manifest infra/env_manifest.jsonl --batch-size 3 --model gemini-flash
 #   bash infra/setup/run_batches.sh --manifest infra/env_manifest.jsonl --batch-size 3 --ami ami-0abc123
 
 set -euo pipefail

@@ -25,7 +25,7 @@
 # After launch, SSH in and run:
 #   source ~/.bashrc
 #   cd ~/mirror-mirror
-#   nohup bash infra/run_all_apps.sh --model gemini-cu --workers 8 \
+#   nohup bash infra/run_all_apps.sh --model gemini-flash --workers 8 \
 #     > /tmp/mirror-mirror-logs/eval.log 2>&1 &
 
 set -euo pipefail

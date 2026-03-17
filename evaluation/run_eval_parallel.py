@@ -74,6 +74,11 @@ def _make_kimi_agent(*, max_steps, timeout, headless, **_kw):
     return KimiVisionAgent(max_steps=max_steps, timeout=timeout, headless=headless)
 
 
+def _make_qwen_agent(*, max_steps, timeout, headless, **_kw):
+    from vision_agents import Qwen35VLAgent
+    return Qwen35VLAgent(max_steps=max_steps, timeout=timeout, headless=headless)
+
+
 # Agent factories: each returns an AgentRunner given common kwargs.
 # Browser-use models use partial application over their LLM factory.
 AGENT_FACTORIES = {
@@ -88,6 +93,7 @@ AGENT_FACTORIES = {
     "gemini-cu": lambda **kw: _make_gemini_cu_agent(**kw),
     "claude-cu": lambda **kw: _make_claude_cu_agent(**kw),
     "kimi": lambda **kw: _make_kimi_agent(**kw),
+    "qwen": lambda **kw: _make_qwen_agent(**kw),
 }
 
 # --- ANSI colors ---

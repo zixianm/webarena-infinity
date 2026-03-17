@@ -27,7 +27,7 @@ from agents import AgentResult
 
 
 # ---------------------------------------------------------------------------
-# Rate-limit retry helper
+# Rate-limit retry helpers
 # ---------------------------------------------------------------------------
 
 def _is_rate_limit(exc: Exception) -> bool:
@@ -68,16 +68,72 @@ async def _async_retry_api_call(fn, *, max_retries: int = 5, base_delay: float =
             raise
 
 
+def _retry_step_api_call(fn, *, max_retries: int = 2, base_delay: float = 2.0):
+    """Retry *fn()* on ANY transient error, with short backoff.
+
+    Wraps the outer API call for a single step.  Rate-limit errors are
+    already handled by the inner ``_retry_api_call``, so this catches
+    transient server errors (500, timeout, network blip).
+
+    Returns ``(result, None)`` on success, or ``(None, error_string)``
+    after exhausting retries.
+    """
+    last_error = None
+    for attempt in range(max_retries + 1):
+        try:
+            return fn(), None
+        except Exception as e:
+            last_error = e
+            if attempt < max_retries:
+                delay = base_delay * (2 ** attempt)
+                time.sleep(delay)
+    return None, f"API error after {max_retries + 1} attempts: {last_error}"
+
+
 # ---------------------------------------------------------------------------
-# Shared Playwright infrastructure
+# Step result — returned by _parse_response hooks
+# ---------------------------------------------------------------------------
+
+
+class StepResult:
+    """Parsed LLM response for one agent step."""
+
+    __slots__ = ("actions", "text", "is_done", "action_descriptions", "raw")
+
+    def __init__(
+        self,
+        *,
+        actions: list[dict],
+        text: str = "",
+        is_done: bool = False,
+        action_descriptions: list[str] | None = None,
+        raw: object = None,
+    ):
+        self.actions = actions
+        self.text = text
+        self.is_done = is_done
+        self.action_descriptions = action_descriptions or []
+        self.raw = raw  # opaque — subclass stores whatever _execute_step needs
+
+
+# ---------------------------------------------------------------------------
+# Shared Playwright infrastructure (template-method base class)
 # ---------------------------------------------------------------------------
 
 
 class VisionAgentBase:
     """Base class for vision-based agents with shared Playwright management.
 
-    Subclasses must implement ``_run_agent_loop`` — the API-specific agentic
-    loop that takes screenshots, calls an LLM, and returns actions.
+    Subclasses implement four hooks:
+
+      _init_conversation  — set up client & conversation state
+      _prepare_step       — build messages for this turn
+      _call_llm_inner     — make the API call (rate-limit retry inside)
+      _parse_response     — parse raw response → StepResult
+
+    Optionally override:
+      _execute_step       — execute actions + build API feedback
+      _on_step_done       — post-action bookkeeping
     """
 
     def __init__(
@@ -88,12 +144,14 @@ class VisionAgentBase:
         max_steps: int = 50,
         timeout: int = 300,
         headless: bool = True,
+        max_consecutive_failures: int = 5,
     ):
         self.viewport_width = viewport_width
         self.viewport_height = viewport_height
         self.max_steps = max_steps
         self.timeout = timeout
         self.headless = headless
+        self.max_consecutive_failures = max_consecutive_failures
         self._playwright = None
         self._browser = None
         self._page = None
@@ -118,6 +176,15 @@ class VisionAgentBase:
         self._page = await self._browser.new_page(
             viewport={"width": self.viewport_width, "height": self.viewport_height},
         )
+        # Auto-dismiss JS dialogs (alert, confirm, prompt, beforeunload)
+        self._page.on("dialog", lambda d: asyncio.ensure_future(self._dismiss_dialog(d)))
+
+    @staticmethod
+    async def _dismiss_dialog(dialog) -> None:
+        try:
+            await dialog.accept()
+        except Exception:
+            pass
 
     async def _close_browser(self) -> None:
         if self._page:
@@ -174,13 +241,31 @@ class VisionAgentBase:
     async def take_screenshot(self) -> bytes:
         return await self._page.screenshot(type="png")
 
+    async def _check_browser_health(self) -> bool:
+        """Return True if the browser is alive; attempt restart if not."""
+        try:
+            await asyncio.wait_for(self._page.evaluate("1+1"), timeout=3.0)
+            return True
+        except Exception:
+            pass
+        # Browser appears dead — attempt restart
+        try:
+            await self._close_browser()
+            await self._launch_browser()
+            if self._server_url:
+                await self._page.goto(self._server_url, wait_until="load")
+                await asyncio.sleep(2)
+            return True
+        except Exception:
+            return False
+
     async def execute_action(self, action: dict) -> None:
         """Execute a single parsed action dict via Playwright.
 
         Supported action types (all coordinates in CSS pixels):
           click(x, y, button="left")
           double_click(x, y)
-          type(x, y, text, clear=False, press_enter=False)
+          input(x, y, text, clear=False, press_enter=False)
           scroll(x, y, direction, amount=3)
           key(keys)  — e.g. "Control+c"
           hover(x, y)
@@ -199,7 +284,7 @@ class VisionAgentBase:
             )
         elif kind == "double_click":
             await page.mouse.dblclick(action["x"], action["y"])
-        elif kind == "type":
+        elif kind == "input":
             x, y = action.get("x"), action.get("y")
             if x is not None and y is not None:
                 await page.mouse.click(x, y)
@@ -251,8 +336,10 @@ class VisionAgentBase:
         # Brief settle after action
         await asyncio.sleep(0.3)
 
+    # -- template-method agent loop -----------------------------------------
+
     async def run(self, task: str, server_url: str, task_dir: Path) -> AgentResult:
-        """Run a single task.  Delegates to subclass ``_run_agent_loop``."""
+        """Run a single task.  Delegates to subclass hooks."""
         task_dir.mkdir(parents=True, exist_ok=True)
         screenshots_dir = task_dir / "screenshots"
         screenshots_dir.mkdir(exist_ok=True)
@@ -313,9 +400,145 @@ class VisionAgentBase:
         task_dir: Path,
         screenshots_dir: Path,
     ) -> dict:
-        """Subclasses implement this.  Returns dict with keys:
-        steps, is_done, final_result, errors, history."""
+        """Template-method loop.  All robustness lives here; subclasses
+        provide API-specific hooks."""
+        history = self._live_history
+        errors = self._live_errors
+        is_done = False
+        final_result = None
+        consecutive_failures = 0
+        empty_output_count = 0
+
+        self._init_conversation(task, server_url)
+
+        for step in range(self.max_steps):
+            # --- consecutive failure budget ---
+            if consecutive_failures >= self.max_consecutive_failures:
+                errors.append(
+                    f"Stopping after {consecutive_failures} consecutive failures"
+                )
+                break
+
+            # --- browser health check ---
+            if not await self._check_browser_health():
+                errors.append(
+                    f"Browser died at step {step} and could not be restarted"
+                )
+                break
+
+            # --- screenshot ---
+            screenshot = await self.take_screenshot()
+            ss_path = screenshots_dir / f"step_{step}.png"
+            ss_path.write_bytes(screenshot)
+
+            # --- subclass: build messages ---
+            self._prepare_step(step, screenshot)
+
+            # --- LLM call with step-level retry ---
+            response, api_err = _retry_step_api_call(
+                lambda: self._call_llm_inner()
+            )
+            if api_err:
+                errors.append(f"Step {step}: {api_err}")
+                consecutive_failures += 1
+                self._on_api_error()
+                continue
+
+            # --- subclass: parse response ---
+            result = self._parse_response(response)
+
+            # --- empty output handling ---
+            # Only treat as truly empty if the model returned NO function
+            # calls / tool uses at all.  If it returned calls we couldn't
+            # parse (or that map to no-ops like open_web_browser), we must
+            # still call _execute_step so the protocol-required responses
+            # (e.g. Gemini function_response) are sent back.
+            if not result.actions and not result.is_done and not result.action_descriptions:
+                empty_output_count += 1
+                if empty_output_count >= 3:
+                    is_done = True
+                    final_result = result.text
+                    history.append(self._make_step_record(result))
+                    break
+                consecutive_failures += 1
+                continue
+
+            # --- clean termination without actions ---
+            if result.is_done and not result.actions:
+                is_done = True
+                final_result = result.text
+                history.append(self._make_step_record(result))
+                break
+
+            # --- successful output — reset failure counters ---
+            consecutive_failures = 0
+            empty_output_count = 0
+
+            # --- record step in history BEFORE executing (survives timeout) ---
+            step_record = self._make_step_record(result)
+            history.append(step_record)
+
+            # --- subclass: execute actions + build API feedback ---
+            await self._execute_step(step, result)
+
+            # --- subclass: post-action bookkeeping ---
+            self._on_step_done(step, result, screenshot)
+
+            # --- post-action termination (e.g. Claude stop_reason) ---
+            if result.is_done:
+                is_done = True
+                final_result = result.text
+                break
+
+        return {
+            "steps": len(history),
+            "is_done": is_done,
+            "final_result": final_result,
+            "errors": errors,
+            "history": history,
+        }
+
+    # -- hooks (subclasses must override first four) -------------------------
+
+    def _init_conversation(self, task: str, server_url: str) -> None:
+        """Set up LLM client and initial conversation state."""
         raise NotImplementedError
+
+    def _prepare_step(self, step: int, screenshot: bytes) -> None:
+        """Build / update messages for this turn."""
+        raise NotImplementedError
+
+    def _call_llm_inner(self):
+        """Make the LLM API call.  Should include rate-limit retry
+        (``_retry_api_call``).  Returns the raw API response object."""
+        raise NotImplementedError
+
+    def _parse_response(self, response) -> StepResult:
+        """Parse raw LLM response into a ``StepResult``.  Also update
+        conversation state with the response (e.g. append to messages)."""
+        raise NotImplementedError
+
+    def _on_api_error(self) -> None:
+        """Clean up conversation state after an API error (no-op default)."""
+
+    async def _execute_step(self, step: int, result: StepResult) -> None:
+        """Execute actions.  Default iterates ``result.actions``.
+        Override to also build API feedback (e.g. Gemini function responses)."""
+        for action in result.actions:
+            try:
+                await self.execute_action(action)
+            except Exception as e:
+                self._live_errors.append(f"Action error at step {step}: {e}")
+
+    def _make_step_record(self, result: StepResult) -> dict:
+        """Build a history record for one step."""
+        return {
+            "thought": result.text,
+            "actions": result.actions,
+        }
+
+    def _on_step_done(self, step: int, result: StepResult, screenshot: bytes) -> None:
+        """Post-action bookkeeping (e.g. Kimi's observation/cot lists)."""
 
 
 # ---------------------------------------------------------------------------
@@ -369,7 +592,7 @@ class GeminiComputerUseAgent(VisionAgentBase):
         elif name == "type_text_at":
             px, py = self._norm_to_pixel(args["x"], args["y"])
             return {
-                "type": "type", "x": px, "y": py,
+                "type": "input", "x": px, "y": py,
                 "text": args.get("text", ""),
                 "press_enter": args.get("press_enter", False),
                 "clear": args.get("clear_before_typing", False),
@@ -413,153 +636,119 @@ class GeminiComputerUseAgent(VisionAgentBase):
             return None  # no-op in our context
         return None
 
-    # -- agent loop ----------------------------------------------------------
+    # -- hooks ---------------------------------------------------------------
 
-    async def _run_agent_loop(
-        self,
-        task: str,
-        server_url: str,
-        task_dir: Path,
-        screenshots_dir: Path,
-    ) -> dict:
-        from google import genai
+    def _init_conversation(self, task: str, server_url: str) -> None:
         from google.genai import types
-
-        client = self._get_client()
-
-        config = types.GenerateContentConfig(
+        self._gemini_config = types.GenerateContentConfig(
             tools=[types.Tool(
                 computer_use=types.ComputerUse(
                     environment=types.Environment.ENVIRONMENT_BROWSER,
                 ),
             )],
         )
+        self._contents: list = []
+        self._pending_response_parts: list = []
+        self._task = task
+        self._server_url_task = server_url
 
-        contents = []
-        history = self._live_history
-        errors = self._live_errors
-        is_done = False
-        final_result = None
-
-        for step in range(self.max_steps):
-            # Take screenshot BEFORE deciding action (what the model sees)
-            screenshot = await self.take_screenshot()
-            ss_path = screenshots_dir / f"step_{step}.png"
-            ss_path.write_bytes(screenshot)
-
-            # Build contents for this turn
-            if step == 0:
-                contents = [
-                    types.Content(
-                        role="user",
-                        parts=[
-                            types.Part(text=(
-                                f"You are interacting with a web application at {server_url}. "
-                                f"Your task: {task}"
-                            )),
-                            types.Part.from_bytes(data=screenshot, mime_type="image/png"),
-                        ],
-                    ),
-                ]
-            else:
-                # Send function responses from previous step + new screenshot
-                contents.append(
-                    types.Content(role="user", parts=self._pending_response_parts + [
+    def _prepare_step(self, step: int, screenshot: bytes) -> None:
+        from google.genai import types
+        if step == 0 or not self._pending_response_parts:
+            # Fresh conversation (first step, or recovery after error/reset)
+            self._contents = [
+                types.Content(
+                    role="user",
+                    parts=[
+                        types.Part(text=(
+                            f"You are interacting with a web application at {self._server_url_task}. "
+                            f"Your task: {self._task}"
+                        )),
                         types.Part.from_bytes(data=screenshot, mime_type="image/png"),
-                    ]),
-                )
+                    ],
+                ),
+            ]
+        else:
+            parts = list(self._pending_response_parts) + [
+                types.Part.from_bytes(data=screenshot, mime_type="image/png"),
+            ]
+            self._contents.append(types.Content(role="user", parts=parts))
 
-            try:
-                response = _retry_api_call(lambda: client.models.generate_content(
-                    model=self.MODEL,
-                    contents=contents,
-                    config=config,
-                ))
-            except Exception as e:
-                errors.append(f"API error at step {step}: {e}")
-                break
+    def _call_llm_inner(self):
+        client = self._get_client()
+        return _retry_api_call(lambda: client.models.generate_content(
+            model=self.MODEL,
+            contents=self._contents,
+            config=self._gemini_config,
+        ))
 
-            if not response.candidates:
-                errors.append(f"Empty response at step {step} (likely safety-blocked)")
-                break
-
-            candidate = response.candidates[0]
-            contents.append(candidate.content)
-
-            # Extract text and function calls
-            step_text = ""
-            function_calls = []
-            for part in candidate.content.parts:
-                if hasattr(part, "text") and part.text:
-                    step_text += part.text
-                if hasattr(part, "function_call") and part.function_call:
-                    function_calls.append(part.function_call)
-
-            if not function_calls:
-                # Model is done — no more actions
-                is_done = True
-                final_result = step_text
-                history.append({
-                    "model_output": {
-                        "current_state": {"thought": step_text},
-                        "action": [],
-                    },
-                    "result": [{"extracted_content": "Task completed (no more actions)"}],
-                })
-                break
-
-            # Record step in history immediately (before executing actions)
-            # so partial progress survives timeout.
-            step_record = {
-                "model_output": {
-                    "current_state": {"thought": step_text},
-                    "action": [],
-                },
-                "result": [{"extracted_content": ""}],
-                "coordinates": [],
-            }
-            history.append(step_record)
-
-            # Execute each function call
-            actions_taken = []
-            parsed_actions = []
+    def _parse_response(self, response) -> StepResult:
+        if not response.candidates:
+            # Safety-blocked — conversation is now in a broken state
+            # (the user turn we just sent is dangling).  Reset so the
+            # next _prepare_step starts fresh.
+            self._contents = []
             self._pending_response_parts = []
-            for fc in function_calls:
-                action = self._parse_gemini_action(fc)
-                action_desc = f"{fc.name}({dict(fc.args) if fc.args else {}})"
-                actions_taken.append(action_desc)
-                if action:
-                    parsed_actions.append(action)
+            return StepResult(actions=[], text="(empty response — likely safety-blocked)")
 
-                if action:
-                    try:
-                        await self.execute_action(action)
-                    except Exception as e:
-                        errors.append(f"Action error at step {step}: {e}")
+        candidate = response.candidates[0]
+        self._contents.append(candidate.content)
 
-                fr_fields = {"url": self._page.url}
-                if fc.args and "safety_decision" in fc.args:
-                    fr_fields["safety_acknowledgement"] = "true"
-                self._pending_response_parts.append(
-                    types.Part.from_function_response(
-                        name=fc.name,
-                        response=fr_fields,
-                    )
+        step_text = ""
+        function_calls = []
+        for part in candidate.content.parts:
+            if hasattr(part, "text") and part.text:
+                step_text += part.text
+            if hasattr(part, "function_call") and part.function_call:
+                function_calls.append(part.function_call)
+
+        if not function_calls:
+            # Model is done — clear pending state so the conversation
+            # doesn't carry stale function_response parts.
+            self._pending_response_parts = []
+            return StepResult(actions=[], text=step_text, is_done=True)
+
+        parsed_actions = []
+        descs = []
+        raw_pairs = []  # (function_call, action_or_none)
+        for fc in function_calls:
+            action = self._parse_gemini_action(fc)
+            desc = f"{fc.name}({dict(fc.args) if fc.args else {}})"
+            descs.append(desc)
+            raw_pairs.append((fc, action))
+            if action:
+                parsed_actions.append(action)
+
+        return StepResult(
+            actions=parsed_actions,
+            text=step_text,
+            action_descriptions=descs,
+            raw=raw_pairs,
+        )
+
+    def _on_api_error(self) -> None:
+        self._contents = []
+        self._pending_response_parts = []
+
+    async def _execute_step(self, step: int, result: StepResult) -> None:
+        from google.genai import types
+        self._pending_response_parts = []
+        for fc, action in result.raw:
+            if action:
+                try:
+                    await self.execute_action(action)
+                except Exception as e:
+                    self._live_errors.append(f"Action error at step {step}: {e}")
+
+            fr_fields = {"url": self._page.url}
+            if fc.args and "safety_decision" in fc.args:
+                fr_fields["safety_acknowledgement"] = "true"
+            self._pending_response_parts.append(
+                types.Part.from_function_response(
+                    name=fc.name,
+                    response=fr_fields,
                 )
-
-            # Update step record with action results
-            step_record["model_output"]["action"] = [{a: ""} for a in actions_taken]
-            step_record["result"] = [{"extracted_content": "; ".join(actions_taken)}]
-            step_record["coordinates"] = parsed_actions
-
-
-        return {
-            "steps": len(history),
-            "is_done": is_done,
-            "final_result": final_result,
-            "errors": errors,
-            "history": history,
-        }
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -615,7 +804,7 @@ class ClaudeComputerUseAgent(VisionAgentBase):
         elif action == "triple_click" and coord:
             return {"type": "double_click", "x": coord[0], "y": coord[1]}  # approximate
         elif action == "type":
-            return {"type": "type", "text": tool_input.get("text", "")}
+            return {"type": "input", "text": tool_input.get("text", "")}
         elif action == "key":
             keys = tool_input.get("text", "")
             # Claude uses "ctrl+a" style — Playwright expects "Control+a"
@@ -647,20 +836,10 @@ class ClaudeComputerUseAgent(VisionAgentBase):
             return {"type": "wait", "seconds": duration}
         return None
 
-    # -- agent loop ----------------------------------------------------------
+    # -- hooks ---------------------------------------------------------------
 
-    async def _run_agent_loop(
-        self,
-        task: str,
-        server_url: str,
-        task_dir: Path,
-        screenshots_dir: Path,
-    ) -> dict:
-        import anthropic
-
-        client = self._get_client()
-
-        tools = [
+    def _init_conversation(self, task: str, server_url: str) -> None:
+        self._claude_tools = [
             {
                 "type": self.TOOL_VERSION,
                 "name": "computer",
@@ -668,172 +847,125 @@ class ClaudeComputerUseAgent(VisionAgentBase):
                 "display_height_px": self.viewport_height,
             },
         ]
+        self._messages: list[dict] = []
+        self._pending_tool_results: list[dict] = []
+        self._task = task
+        self._server_url_task = server_url
 
-        messages = []
-        history = self._live_history
-        errors = self._live_errors
-        is_done = False
-        final_result = None
-
-        for step in range(self.max_steps):
-            # Take screenshot BEFORE deciding action (what the model sees)
-            screenshot = await self.take_screenshot()
-            ss_path = screenshots_dir / f"step_{step}.png"
-            ss_path.write_bytes(screenshot)
-            b64_screenshot = base64.b64encode(screenshot).decode()
-
-            if step == 0:
-                messages = [
-                    {
-                        "role": "user",
-                        "content": [
-                            {
-                                "type": "text",
-                                "text": (
-                                    f"You are interacting with a web application at {server_url}. "
-                                    f"Your task: {task}"
-                                ),
-                            },
-                            {
-                                "type": "image",
-                                "source": {
-                                    "type": "base64",
-                                    "media_type": "image/png",
-                                    "data": b64_screenshot,
-                                },
-                            },
-                        ],
-                    },
-                ]
-            else:
-                # Send tool results from previous step with new screenshot
-                self._pending_tool_results[-1]["content"] = [
-                    {
-                        "type": "image",
-                        "source": {
-                            "type": "base64",
-                            "media_type": "image/png",
-                            "data": b64_screenshot,
+    def _prepare_step(self, step: int, screenshot: bytes) -> None:
+        b64 = base64.b64encode(screenshot).decode()
+        if step == 0 or not self._pending_tool_results:
+            self._messages = [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": (
+                                f"You are interacting with a web application at {self._server_url_task}. "
+                                f"Your task: {self._task}"
+                            ),
                         },
-                    },
-                ]
-                messages.append({"role": "user", "content": self._pending_tool_results})
-
-            try:
-                response = _retry_api_call(lambda: client.beta.messages.create(
-                    model=self.MODEL,
-                    max_tokens=4096,
-                    tools=tools,
-                    messages=messages,
-                    betas=[self.BETA_FLAG],
-                ))
-            except Exception as e:
-                errors.append(f"API error at step {step}: {e}")
-                break
-
-            # Process response content blocks
-            response_content = response.content
-            messages.append({"role": "assistant", "content": response_content})
-
-            # Extract text and tool_use blocks
-            step_text = ""
-            tool_uses = []
-            for block in response_content:
-                if hasattr(block, "text"):
-                    step_text += block.text
-                if block.type == "tool_use":
-                    tool_uses.append(block)
-
-            # If no tool calls, Claude is done
-            if not tool_uses:
-                is_done = True
-                final_result = step_text
-                history.append({
-                    "model_output": {
-                        "current_state": {"thought": step_text},
-                        "action": [],
-                    },
-                    "result": [{"extracted_content": "Task completed (no more actions)"}],
-                })
-                break
-
-            # Record step in history immediately (before executing actions)
-            # so partial progress survives timeout.
-            step_record = {
-                "model_output": {
-                    "current_state": {"thought": step_text},
-                    "action": [],
+                        {
+                            "type": "image",
+                            "source": {
+                                "type": "base64",
+                                "media_type": "image/png",
+                                "data": b64,
+                            },
+                        },
+                    ],
                 },
-                "result": [{"extracted_content": ""}],
-                "coordinates": [],
-            }
-            history.append(step_record)
+            ]
+        else:
+            # Attach screenshot to last tool result
+            self._pending_tool_results[-1]["content"] = [
+                {
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": "image/png",
+                        "data": b64,
+                    },
+                },
+            ]
+            self._messages.append({"role": "user", "content": list(self._pending_tool_results)})
 
-            # Execute each tool use
-            parsed_actions = []
-            actions_taken = []
-            self._pending_tool_results = []
+    def _call_llm_inner(self):
+        client = self._get_client()
+        return _retry_api_call(lambda: client.beta.messages.create(
+            model=self.MODEL,
+            max_tokens=4096,
+            tools=self._claude_tools,
+            messages=self._messages,
+            betas=[self.BETA_FLAG],
+        ))
 
-            for tu in tool_uses:
-                if tu.name != "computer":
-                    self._pending_tool_results.append({
-                        "type": "tool_result",
-                        "tool_use_id": tu.id,
-                        "content": "Unknown tool",
-                        "is_error": True,
-                    })
-                    continue
+    def _parse_response(self, response) -> StepResult:
+        response_content = response.content
+        self._messages.append({"role": "assistant", "content": response_content})
 
-                tool_input = tu.input
-                action_name = tool_input.get("action", "")
+        step_text = ""
+        tool_uses = []
+        for block in response_content:
+            if hasattr(block, "text"):
+                step_text += block.text
+            if block.type == "tool_use":
+                tool_uses.append(block)
 
-                # Handle screenshot action — just take a fresh screenshot
-                if action_name == "screenshot":
-                    actions_taken.append("screenshot")
-                    self._pending_tool_results.append({
-                        "type": "tool_result",
-                        "tool_use_id": tu.id,
-                        "content": [],  # will be filled with screenshot next iteration
-                    })
-                    continue
+        if not tool_uses:
+            # end_turn without tool calls → definitely done
+            return StepResult(
+                actions=[],
+                text=step_text,
+                is_done=(response.stop_reason == "end_turn"),
+            )
 
-                # Parse and execute action
-                action = self._parse_claude_action(tool_input)
-                action_desc = f"{action_name}({tool_input})"
-                actions_taken.append(action_desc)
+        parsed_actions = []
+        descs = []
+        self._pending_tool_results = []
 
-                if action:
-                    parsed_actions.append(action)
-                    try:
-                        await self.execute_action(action)
-                    except Exception as e:
-                        errors.append(f"Action error at step {step}: {e}")
-
+        for tu in tool_uses:
+            if tu.name != "computer":
                 self._pending_tool_results.append({
                     "type": "tool_result",
                     "tool_use_id": tu.id,
-                    "content": [],  # will be filled with screenshot next iteration
+                    "content": "Unknown tool",
+                    "is_error": True,
                 })
+                continue
 
-            # Update step record with action results
-            step_record["model_output"]["action"] = [{a: ""} for a in actions_taken]
-            step_record["result"] = [{"extracted_content": "; ".join(actions_taken)}]
-            step_record["coordinates"] = parsed_actions
+            tool_input = tu.input
+            action_name = tool_input.get("action", "")
 
-            # If stop_reason is not tool_use, Claude is done
-            if response.stop_reason != "tool_use":
-                is_done = True
-                final_result = step_text
-                break
+            if action_name == "screenshot":
+                descs.append("screenshot")
+                self._pending_tool_results.append({
+                    "type": "tool_result",
+                    "tool_use_id": tu.id,
+                    "content": [],
+                })
+                continue
 
+            action = self._parse_claude_action(tool_input)
+            desc = f"{action_name}({tool_input})"
+            descs.append(desc)
+            if action:
+                parsed_actions.append(action)
 
-        return {
-            "steps": len(history),
-            "is_done": is_done,
-            "final_result": final_result,
-            "errors": errors,
-            "history": history,
-        }
+            self._pending_tool_results.append({
+                "type": "tool_result",
+                "tool_use_id": tu.id,
+                "content": [],
+            })
+
+        return StepResult(
+            actions=parsed_actions,
+            text=step_text,
+            is_done=(response.stop_reason != "tool_use"),
+            action_descriptions=descs,
+        )
+
 
 
 # ---------------------------------------------------------------------------
@@ -879,7 +1011,7 @@ class KimiVisionAgent(VisionAgentBase):
     MODEL = "kimi-k2.5"
     BASE_URL = "https://api.moonshot.ai/v1"
 
-    def __init__(self, *, max_steps: int = 50, timeout: int = 300, headless: bool = True, **_kw):
+    def __init__(self, *, max_steps: int = 50, timeout: int = 500, headless: bool = True, **_kw):
         super().__init__(
             viewport_width=1920,
             viewport_height=1080,
@@ -936,7 +1068,7 @@ class KimiVisionAgent(VisionAgentBase):
     # -- response parsing ----------------------------------------------------
 
     @staticmethod
-    def _parse_response(response: dict) -> tuple[str, str, list[dict]]:
+    def _parse_kimi_response(response: dict) -> tuple[str, str, list[dict]]:
         """Parse Kimi response into (thought, action_desc, actions).
 
         Returns parsed action dicts ready for execute_action().
@@ -979,75 +1111,116 @@ class KimiVisionAgent(VisionAgentBase):
         actions = KimiVisionAgent._parse_pyautogui_code(code)
         return thought, action_desc, actions
 
+    # Parameter order for pyautogui functions (from official docs / OSWorld ref)
+    _PYAUTOGUI_PARAMS: dict[str, list[str]] = {
+        "click":       ["x", "y", "clicks", "interval", "button", "duration", "pause"],
+        "leftClick":   ["x", "y", "duration", "tween", "pause"],
+        "rightClick":  ["x", "y", "duration", "tween", "pause"],
+        "middleClick": ["x", "y", "duration", "tween", "pause"],
+        "doubleClick": ["x", "y", "interval", "button", "duration", "pause"],
+        "tripleClick": ["x", "y", "interval", "button", "duration", "pause"],
+        "moveTo":      ["x", "y", "duration", "tween", "pause"],
+        "dragTo":      ["x", "y", "duration", "button", "mouseDownUp", "pause"],
+        "scroll":      ["clicks", "x", "y", "pause"],
+        "typewrite":   ["message", "interval", "pause"],
+        "write":       ["message", "interval", "pause"],
+        "press":       ["keys", "presses", "interval", "pause"],
+        "hotkey":      [],  # variadic positional
+    }
+
+    _KEY_MAP: dict[str, str] = {
+        "ctrl": "Control", "alt": "Alt", "shift": "Shift",
+        "enter": "Enter", "return": "Enter", "tab": "Tab",
+        "delete": "Delete", "backspace": "Backspace",
+        "escape": "Escape", "esc": "Escape", "space": " ",
+        "up": "ArrowUp", "down": "ArrowDown",
+        "left": "ArrowLeft", "right": "ArrowRight",
+        "super": "Meta",
+    }
+
     @staticmethod
     def _parse_pyautogui_code(code: str) -> list[dict]:
-        """Parse pyautogui function calls from code string into action dicts.
+        """Parse pyautogui calls from *code* into action dicts.
 
-        Handles: click, doubleClick, rightClick, moveTo, typewrite/write,
-        hotkey, press, scroll, dragTo.  Coordinates are treated as relative
-        (0-1) and converted to absolute later.
+        Uses ``ast.parse`` (same approach as the OSWorld reference) for
+        robust handling of keyword args, triple-quoted strings, etc.
         """
-        actions = []
+        import ast as _ast
 
-        # Match pyautogui.xxx(...) calls
-        for match in re.finditer(r"pyautogui\.(\w+)\((.*?)\)", code, re.DOTALL):
-            func_name = match.group(1)
-            args_str = match.group(2).strip()
+        actions: list[dict] = []
+        params_map = KimiVisionAgent._PYAUTOGUI_PARAMS
+        key_map = KimiVisionAgent._KEY_MAP
 
-            # Simple arg parser: extract positional and keyword args
-            parsed = _parse_args_simple(args_str)
+        # Match pyautogui.xxx(...) calls — grab the full call for ast
+        for match in re.finditer(r"(pyautogui\.(\w+)\([^)]*\))", code, re.DOTALL):
+            full_call = match.group(1)
+            func_name = match.group(2)
 
+            # Parse with ast for robust arg extraction
+            try:
+                tree = _ast.parse(full_call.replace("pyautogui.", "_pag_.", 1))
+                call_node = tree.body[0].value
+                positional = [_ast.literal_eval(a) for a in call_node.args]
+                keywords = {
+                    kw.arg: _ast.literal_eval(kw.value)
+                    for kw in call_node.keywords
+                    if kw.arg is not None
+                }
+            except Exception:
+                continue  # skip unparseable calls
+
+            # Merge positional args using the known parameter order
+            param_names = params_map.get(func_name, [])
+            args: dict = {}
+            for i, val in enumerate(positional):
+                if func_name == "hotkey":
+                    args[i] = val  # variadic — keep numeric keys
+                elif i < len(param_names):
+                    args[param_names[i]] = val
+            args.update(keywords)
+
+            # --- map to action dicts ---
             if func_name in ("click", "leftClick"):
-                x, y = _get_xy(parsed)
-                actions.append({"type": "click", "x": x, "y": y})
+                x, y = float(args.get("x", 0)), float(args.get("y", 0))
+                a: dict = {"type": "click", "x": x, "y": y}
+                if args.get("button"):
+                    a["button"] = str(args["button"])
+                actions.append(a)
             elif func_name == "rightClick":
-                x, y = _get_xy(parsed)
-                actions.append({"type": "click", "x": x, "y": y, "button": "right"})
-            elif func_name == "doubleClick":
-                x, y = _get_xy(parsed)
-                actions.append({"type": "double_click", "x": x, "y": y})
+                actions.append({"type": "click", "x": float(args.get("x", 0)),
+                                "y": float(args.get("y", 0)), "button": "right"})
+            elif func_name == "middleClick":
+                actions.append({"type": "click", "x": float(args.get("x", 0)),
+                                "y": float(args.get("y", 0)), "button": "middle"})
+            elif func_name in ("doubleClick", "tripleClick"):
+                actions.append({"type": "double_click", "x": float(args.get("x", 0)),
+                                "y": float(args.get("y", 0))})
             elif func_name == "moveTo":
-                x, y = _get_xy(parsed)
-                actions.append({"type": "hover", "x": x, "y": y})
+                actions.append({"type": "hover", "x": float(args.get("x", 0)),
+                                "y": float(args.get("y", 0))})
             elif func_name in ("typewrite", "write"):
-                text = parsed.get(0, parsed.get("text", ""))
-                if isinstance(text, str):
-                    text = text.strip("'\"")
-                actions.append({"type": "type", "text": str(text)})
+                text = str(args.get("message", ""))
+                actions.append({"type": "input", "text": text})
             elif func_name == "hotkey":
-                # hotkey('ctrl', 'a') → "Control+a"
-                keys = [str(parsed.get(i, "")).strip("'\"") for i in range(10) if i in parsed]
-                key_map = {"ctrl": "Control", "alt": "Alt", "shift": "Shift",
-                           "enter": "Enter", "return": "Enter", "tab": "Tab",
-                           "delete": "Delete", "backspace": "Backspace",
-                           "escape": "Escape", "esc": "Escape"}
+                keys = [str(args[i]) for i in sorted(k for k in args if isinstance(k, int))]
                 mapped = [key_map.get(k.lower(), k) for k in keys if k]
                 if mapped:
                     actions.append({"type": "key", "keys": "+".join(mapped)})
             elif func_name == "press":
-                key = str(parsed.get(0, parsed.get("key", ""))).strip("'\"")
-                key_map = {"enter": "Enter", "return": "Enter", "tab": "Tab",
-                           "escape": "Escape", "esc": "Escape", "backspace": "Backspace",
-                           "delete": "Delete", "space": " ", "up": "ArrowUp",
-                           "down": "ArrowDown", "left": "ArrowLeft", "right": "ArrowRight"}
+                key = str(args.get("keys", args.get(0, "")))
                 actions.append({"type": "key", "keys": key_map.get(key.lower(), key)})
             elif func_name == "scroll":
-                amount = int(float(parsed.get(0, parsed.get("clicks", 3))))
+                amount = int(float(args.get("clicks", 3)))
                 direction = "down" if amount < 0 else "up"
-                x = parsed.get("x", parsed.get(1))
-                y = parsed.get("y", parsed.get(2))
-                action = {
-                    "type": "scroll",
-                    "direction": direction,
-                    "amount": abs(amount),
-                }
-                if x is not None and y is not None:
-                    action["x"] = float(x)
-                    action["y"] = float(y)
-                actions.append(action)
+                a = {"type": "scroll", "direction": direction, "amount": abs(amount)}
+                if "x" in args and "y" in args:
+                    a["x"] = float(args["x"])
+                    a["y"] = float(args["y"])
+                actions.append(a)
             elif func_name == "dragTo":
-                x, y = _get_xy(parsed)
-                actions.append({"type": "drag", "x": 0, "y": 0, "dest_x": x, "dest_y": y})
+                actions.append({"type": "drag", "x": 0, "y": 0,
+                                "dest_x": float(args.get("x", 0)),
+                                "dest_y": float(args.get("y", 0))})
 
         # Handle time.sleep calls
         for match in re.finditer(r"time\.sleep\((\d+(?:\.\d+)?)\)", code):
@@ -1074,225 +1247,502 @@ class KimiVisionAgent(VisionAgentBase):
                         action[key] = int(round(v))
         return actions
 
-    # -- agent loop ----------------------------------------------------------
+    # -- hooks ---------------------------------------------------------------
 
-    async def _run_agent_loop(
-        self,
-        task: str,
-        server_url: str,
-        task_dir: Path,
-        screenshots_dir: Path,
-    ) -> dict:
-        history = self._live_history
-        errors = self._live_errors
-        is_done = False
-        final_result = None
-        max_image_history = 3
+    def _init_conversation(self, task: str, server_url: str) -> None:
+        self._instruction_prompt = _KIMI_INSTRUCTION_TEMPLATE.format(instruction=task)
+        self._observations: list[bytes] = []
+        self._cots: list[dict] = []
+        self._max_image_history = 3
+        self._current_messages: list[dict] = []
 
-        # Track observations and cots for history replay (OSWorld pattern)
-        observations: list[bytes] = []
-        cots: list[dict] = []
+    def _prepare_step(self, step: int, screenshot: bytes) -> None:
+        b64 = base64.b64encode(screenshot).decode()
+        cots = self._cots
+        observations = self._observations
+        mih = self._max_image_history
 
-        instruction_prompt = _KIMI_INSTRUCTION_TEMPLATE.format(instruction=task)
+        # Build messages from scratch each turn (OSWorld pattern)
+        messages: list[dict] = [
+            {"role": "system", "content": _KIMI_SYSTEM_PROMPT},
+        ]
 
-        for step in range(self.max_steps):
-            # Take screenshot
-            screenshot = await self.take_screenshot()
-            ss_path = screenshots_dir / f"step_{step}.png"
-            ss_path.write_bytes(screenshot)
-            b64_screenshot = base64.b64encode(screenshot).decode()
-
-            # Build messages from scratch each turn (OSWorld pattern):
-            # system → [old history text-only] → [recent history with images] → current screenshot
-            messages: list[dict] = [
-                {"role": "system", "content": _KIMI_SYSTEM_PROMPT},
-            ]
-
-            # Replay history as alternating user/assistant messages
-            for i in range(len(cots)):
-                if i > len(cots) - max_image_history:
-                    # Recent steps: include screenshot image
-                    messages.append({
-                        "role": "user",
-                        "content": [
-                            {
-                                "type": "image_url",
-                                "image_url": {
-                                    "url": f"data:image/png;base64,{base64.b64encode(observations[i]).decode()}",
-                                },
+        for i in range(len(cots)):
+            if i > len(cots) - mih:
+                messages.append({
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/png;base64,{base64.b64encode(observations[i]).decode()}",
                             },
-                        ],
-                    })
-                    messages.append({
-                        "role": "assistant",
-                        "content": (
-                            _KIMI_STEP_TEMPLATE.format(step_num=i + 1)
-                            + _KIMI_HISTORY_TEMPLATE.format(
-                                thought=cots[i].get("thought", ""),
-                                action=cots[i].get("action", ""),
-                            )
-                        ),
-                    })
-                elif i == len(cots) - max_image_history:
-                    # Batch older steps as text-only in one assistant message
-                    old_texts = []
-                    for j in range(i + 1):
-                        old_texts.append(
-                            _KIMI_STEP_TEMPLATE.format(step_num=j + 1)
-                            + _KIMI_HISTORY_TEMPLATE.format(
-                                thought=cots[j].get("thought", ""),
-                                action=cots[j].get("action", ""),
-                            )
+                        },
+                    ],
+                })
+                messages.append({
+                    "role": "assistant",
+                    "content": (
+                        _KIMI_STEP_TEMPLATE.format(step_num=i + 1)
+                        + _KIMI_HISTORY_TEMPLATE.format(
+                            thought=cots[i].get("thought", ""),
+                            action=cots[i].get("action", ""),
                         )
-                    messages.append({
-                        "role": "assistant",
-                        "content": "\n".join(old_texts),
-                    })
+                    ),
+                })
+            elif i == len(cots) - mih:
+                old_texts = []
+                for j in range(i + 1):
+                    old_texts.append(
+                        _KIMI_STEP_TEMPLATE.format(step_num=j + 1)
+                        + _KIMI_HISTORY_TEMPLATE.format(
+                            thought=cots[j].get("thought", ""),
+                            action=cots[j].get("action", ""),
+                        )
+                    )
+                messages.append({
+                    "role": "assistant",
+                    "content": "\n".join(old_texts),
+                })
 
-            # Current observation + instruction
-            user_content: list[dict] = [
+        messages.append({
+            "role": "user",
+            "content": [
                 {
                     "type": "image_url",
-                    "image_url": {"url": f"data:image/png;base64,{b64_screenshot}"},
+                    "image_url": {"url": f"data:image/png;base64,{b64}"},
                 },
                 {
                     "type": "text",
-                    "text": instruction_prompt,
+                    "text": self._instruction_prompt,
                 },
-            ]
+            ],
+        })
+
+        self._current_messages = messages
+
+    def _call_llm_inner(self):
+        return _retry_api_call(lambda: self._call_api(self._current_messages))
+
+    def _parse_response(self, response) -> StepResult:
+        full_content = response.get("content", "").strip()
+        thought, action_desc, actions = self._parse_kimi_response(response)
+
+        if not actions:
+            return StepResult(actions=[], text=full_content or thought)
+
+        # Check for termination
+        if any(a.get("type") == "_terminate" for a in actions):
+            status = next(
+                (a["status"] for a in actions if a.get("type") == "_terminate"),
+                "done",
+            )
+            return StepResult(
+                actions=[{"type": "terminate", "status": status}],
+                text=full_content or thought,
+                is_done=True,
+            )
+
+        # Convert coordinates before returning
+        actions = self._convert_relative_coords(actions)
+
+        return StepResult(
+            actions=actions,
+            text=full_content or thought,
+            raw={"thought": thought, "action_desc": action_desc},
+        )
+
+    def _on_step_done(self, step: int, result: StepResult, screenshot: bytes) -> None:
+        raw = result.raw or {}
+        self._observations.append(screenshot)
+        self._cots.append({
+            "thought": raw.get("thought", result.text),
+            "action": raw.get("action_desc", ""),
+        })
+
+
+# ---------------------------------------------------------------------------
+# Qwen 3.5 VL Agent
+# ---------------------------------------------------------------------------
+
+
+# System prompt adapted from the OSWorld reference implementation.
+_QWEN_TOOLS_DEF = json.dumps({
+    "type": "function",
+    "function": {
+        "name": "computer_use",
+        "description": "Use a mouse and keyboard to interact with a web application.",
+        "parameters": {
+            "type": "object",
+            "required": ["action"],
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": [
+                        "key", "type", "mouse_move",
+                        "left_click", "left_click_drag",
+                        "right_click", "middle_click",
+                        "double_click", "triple_click",
+                        "scroll", "wait", "terminate",
+                    ],
+                },
+                "keys": {"type": "array", "description": "Required only by action=key."},
+                "text": {"type": "string", "description": "Required by action=type."},
+                "coordinate": {"type": "array", "description": "(x, y) pixel coordinate."},
+                "pixels": {"type": "number", "description": "Scroll amount in pixels."},
+                "time": {"type": "number", "description": "Seconds to wait."},
+                "status": {
+                    "type": "string",
+                    "description": "Task status for terminate.",
+                    "enum": ["success", "failure"],
+                },
+            },
+        },
+    },
+})
+
+_QWEN_SYSTEM_PROMPT = (
+    "You are a multi-purpose intelligent assistant. Based on my requests, "
+    "you can use tools to help me complete various tasks.\n\n"
+    "# Tools\n\n"
+    "You have access to the following functions:\n\n"
+    "<tools>\n" + _QWEN_TOOLS_DEF + "\n</tools>\n\n"
+    "If you choose to call a function ONLY reply in the following format with NO suffix:\n\n"
+    "<tool_call>\n"
+    "<function=example_function_name>\n"
+    "<parameter=example_parameter_1>\n"
+    "value_1\n"
+    "</parameter>\n"
+    "<parameter=example_parameter_2>\n"
+    "This is the value for the second parameter\n"
+    "that can span\n"
+    "multiple lines\n"
+    "</parameter>\n"
+    "</function>\n"
+    "</tool_call>\n\n"
+    "<IMPORTANT>\n"
+    "Reminder:\n"
+    "- Function calls MUST follow the specified format: an inner "
+    "<function=...></function> block must be nested within "
+    "<tool_call></tool_call> XML tags\n"
+    "- Required parameters MUST be specified\n"
+    "- You may provide optional reasoning for your function call in "
+    "natural language BEFORE the function call, but NOT after\n"
+    "</IMPORTANT>\n\n"
+    "# Response format\n\n"
+    "Response format for every step:\n"
+    "1) Action: a short imperative describing what to do in the UI.\n"
+    "2) A single <tool_call>...</tool_call> block.\n\n"
+    "Rules:\n"
+    "- Output exactly in the order: Action, <tool_call>.\n"
+    "- Be brief: one sentence for Action.\n"
+    "- Do not output anything else outside those parts.\n"
+    "- If finishing, use action=terminate in the tool call.\n"
+    "- The screen's resolution is 1000x1000."
+)
+
+_QWEN_COLLAPSED_TEXT = "This screenshot has been collapsed."
+
+
+class Qwen35VLAgent(VisionAgentBase):
+    """Agent using Qwen 3.5 VL via an OpenAI-compatible API.
+
+    Uses XML tool-call output format with 0-999 normalised coordinates.
+    Requires ``openai`` package and ``QWEN_API_KEY`` / ``QWEN_BASE_URL``
+    environment variables.
+    """
+
+    MODEL = "qwen3.5-plus"
+    BASE_URL = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+
+    def __init__(
+        self,
+        *,
+        max_steps: int = 50,
+        timeout: int = 500,
+        headless: bool = True,
+        model: str | None = None,
+        image_max: int = 20,
+        fold_size: int = 10,
+        history_n: int = 100,
+        **_kw,
+    ):
+        super().__init__(
+            viewport_width=1920,
+            viewport_height=1080,
+            max_steps=max_steps,
+            timeout=timeout,
+            headless=headless,
+        )
+        if model:
+            self.MODEL = model
+        self._client = None
+        self._image_max = image_max
+        self._fold_size = fold_size
+        self._history_n = history_n
+
+    def _get_client(self):
+        if self._client is None:
+            from openai import OpenAI
+            api_key = os.environ.get("DASHSCOPE_API_KEY", "")
+            if not api_key:
+                raise RuntimeError("DASHSCOPE_API_KEY environment variable not set")
+            self._client = OpenAI(api_key=api_key, base_url=self.BASE_URL)
+        return self._client
+
+    # -- coordinate conversion -----------------------------------------------
+
+    def _qwen_to_pixel(self, x: float, y: float) -> tuple[int, int]:
+        """Convert Qwen's 0-999 normalised coords to viewport pixels."""
+        px = int(x * self.viewport_width / 999)
+        py = int(y * self.viewport_height / 999)
+        return px, py
+
+    # -- XML tool-call parsing -----------------------------------------------
+
+    @staticmethod
+    def _parse_xml_tool_call(xml: str) -> dict | None:
+        """Parse a ``<function=computer_use>`` XML block into a param dict."""
+        func_match = re.search(r"<function=([^>]+)>", xml)
+        if not func_match or func_match.group(1) != "computer_use":
+            return None
+        params: dict = {}
+        for m in re.finditer(
+            r"<parameter=([^>]+)>\s*(.*?)\s*</parameter>", xml, re.DOTALL
+        ):
+            name, value = m.group(1), m.group(2).strip()
+            if value.startswith("[") or value.startswith("{"):
+                try:
+                    params[name] = json.loads(value)
+                    continue
+                except json.JSONDecodeError:
+                    pass
+            params[name] = value
+        return params
+
+    def _tool_params_to_actions(self, params: dict) -> list[dict]:
+        """Convert parsed XML tool-call params into action dicts."""
+        action = params.get("action", "")
+        coord = None
+        raw_coord = params.get("coordinate")
+        if isinstance(raw_coord, str):
+            try:
+                raw_coord = json.loads(raw_coord)
+            except json.JSONDecodeError:
+                raw_coord = None
+        if isinstance(raw_coord, list) and len(raw_coord) >= 2:
+            coord = self._qwen_to_pixel(float(raw_coord[0]), float(raw_coord[1]))
+
+        actions: list[dict] = []
+
+        if action == "left_click":
+            if coord:
+                actions.append({"type": "click", "x": coord[0], "y": coord[1]})
+        elif action == "right_click":
+            if coord:
+                actions.append({"type": "click", "x": coord[0], "y": coord[1], "button": "right"})
+        elif action == "middle_click":
+            if coord:
+                actions.append({"type": "click", "x": coord[0], "y": coord[1], "button": "middle"})
+        elif action in ("double_click", "triple_click"):
+            if coord:
+                actions.append({"type": "double_click", "x": coord[0], "y": coord[1]})
+        elif action == "mouse_move":
+            if coord:
+                actions.append({"type": "hover", "x": coord[0], "y": coord[1]})
+        elif action == "left_click_drag":
+            if coord:
+                actions.append({"type": "drag", "x": 0, "y": 0,
+                                "dest_x": coord[0], "dest_y": coord[1]})
+        elif action == "type":
+            text = params.get("text", "")
+            actions.append({"type": "input", "text": str(text)})
+        elif action == "key":
+            raw_keys = params.get("keys", [])
+            if isinstance(raw_keys, str):
+                try:
+                    raw_keys = json.loads(raw_keys)
+                except json.JSONDecodeError:
+                    raw_keys = [raw_keys]
+            if isinstance(raw_keys, list):
+                keys = [str(k).strip() for k in raw_keys]
+            else:
+                keys = [str(raw_keys).strip()]
+            if len(keys) > 1:
+                actions.append({"type": "key", "keys": "+".join(keys)})
+            elif keys:
+                actions.append({"type": "key", "keys": keys[0]})
+        elif action in ("scroll", "hscroll"):
+            pixels = 0
+            try:
+                pixels = int(float(params.get("pixels", 0)))
+            except (ValueError, TypeError):
+                pass
+            direction = "down" if pixels < 0 else "up"
+            a: dict = {"type": "scroll", "direction": direction,
+                       "amount": max(1, abs(pixels) // 100)}
+            if coord:
+                a["x"] = coord[0]
+                a["y"] = coord[1]
+            actions.append(a)
+        elif action == "wait":
+            secs = 5
+            try:
+                secs = int(float(params.get("time", 5)))
+            except (ValueError, TypeError):
+                pass
+            actions.append({"type": "wait", "seconds": secs})
+        elif action == "terminate":
+            status = params.get("status", "success")
+            actions.append({"type": "terminate", "status": status})
+
+        return actions
+
+    # -- hooks ---------------------------------------------------------------
+
+    def _init_conversation(self, task: str, server_url: str) -> None:
+        self._task = task
+        self._server_url_task = server_url
+        self._screenshots_b64: list[str] = []
+        self._responses: list[str] = []
+        self._action_summaries: list[str] = []
+        self._folded_prefix_k = 0
+        self._current_messages: list[dict] = []
+
+    def _prepare_step(self, step: int, screenshot: bytes) -> None:
+        b64 = base64.b64encode(screenshot).decode()
+        self._screenshots_b64.append(b64)
+        total = len(self._screenshots_b64)
+
+        # Update folding state (same logic as reference)
+        while (total - self._folded_prefix_k) > self._image_max:
+            self._folded_prefix_k += self._fold_size
+        if self._folded_prefix_k > total:
+            self._folded_prefix_k = total
+
+        # Truncate history to last history_n steps (matching reference)
+        start_step = max(1, total - self._history_n)
+
+        # Build "previous actions" summary for older steps not in message window
+        prev = [
+            f"Step {i + 1}: {self._action_summaries[i]}"
+            for i in range(min(step, len(self._action_summaries)))
+        ]
+        prev_str = "\n".join(prev) if prev else "None"
+
+        instruction_prompt = (
+            f"\nPlease generate the next move according to the UI screenshot, "
+            f"instruction and previous actions.\n\n"
+            f"Instruction: You are interacting with a web application at "
+            f"{self._server_url_task}. {self._task}\n\n"
+            f"Previous actions:\n{prev_str}"
+        )
+
+        messages: list[dict] = [
+            {"role": "system", "content": [{"type": "text", "text": _QWEN_SYSTEM_PROMPT}]},
+        ]
+
+        for s in range(start_step, total + 1):
+            is_first = (s == start_step)
+            is_collapsed = (s <= self._folded_prefix_k)
+
+            if is_collapsed:
+                if is_first:
+                    user_content = [{"type": "text", "text": instruction_prompt}]
+                else:
+                    user_content = [
+                        {"type": "text", "text": "<tool_response>\n"},
+                        {"type": "text", "text": _QWEN_COLLAPSED_TEXT},
+                        {"type": "text", "text": "\n</tool_response>"},
+                    ]
+            else:
+                img_url = f"data:image/png;base64,{self._screenshots_b64[s - 1]}"
+                if is_first:
+                    user_content = [
+                        {"type": "image_url", "image_url": {"url": img_url}},
+                        {"type": "text", "text": instruction_prompt},
+                    ]
+                else:
+                    user_content = [
+                        {"type": "text", "text": "<tool_response>\n"},
+                        {"type": "image_url", "image_url": {"url": img_url}},
+                        {"type": "text", "text": "\n</tool_response>"},
+                    ]
+
             messages.append({"role": "user", "content": user_content})
 
-            # Call API
-            try:
-                response = _retry_api_call(lambda: self._call_api(messages))
-            except Exception as e:
-                errors.append(f"API error at step {step}: {e}")
-                break
-
-            # Parse response
-            thought, action_desc, actions = self._parse_response(response)
-
-            if not actions:
-                errors.append(f"No actions parsed at step {step}")
-                break
-
-            # Check for termination
-            if any(a.get("type") == "_terminate" for a in actions):
-                is_done = True
-                status = next(
-                    (a["status"] for a in actions if a.get("type") == "_terminate"),
-                    "done",
-                )
-                final_result = f"Agent terminated with status: {status}"
-                history.append({
-                    "model_output": {
-                        "current_state": {"thought": thought},
-                        "action": [{action_desc: ""}],
-                    },
-                    "result": [{"extracted_content": final_result}],
+            # Add assistant response for past steps (not the current one)
+            if s <= total - 1 and (s - 1) < len(self._responses):
+                messages.append({
+                    "role": "assistant",
+                    "content": [{"type": "text", "text": self._responses[s - 1]}],
                 })
+
+        self._current_messages = messages
+
+    def _call_llm_inner(self):
+        client = self._get_client()
+        return _retry_api_call(lambda: client.chat.completions.create(
+            model=self.MODEL,
+            messages=self._current_messages,
+            max_tokens=32768,
+            top_p=0.9,
+            temperature=0.0,
+        ))
+
+    def _parse_response(self, response) -> StepResult:
+        # Extract text content from response
+        choice = response.choices[0]
+        content = choice.message.content or ""
+        if isinstance(content, list):
+            content = "".join(
+                p.get("text", "") if isinstance(p, dict) else getattr(p, "text", "")
+                for p in content
+            )
+
+        # Store raw response for history replay
+        self._responses.append(content)
+
+        # Parse XML tool calls
+        all_actions: list[dict] = []
+        for tc_match in re.finditer(
+            r"<tool_call>(.*?)</tool_call>", content, re.DOTALL
+        ):
+            params = self._parse_xml_tool_call(tc_match.group(1))
+            if params:
+                all_actions.extend(self._tool_params_to_actions(params))
+
+        # Extract action summary line
+        summary = ""
+        for line in content.split("\n"):
+            stripped = line.strip()
+            if stripped.lower().startswith("action:"):
+                summary = stripped.split("Action:", 1)[-1].strip()
                 break
+        self._action_summaries.append(summary or "action")
 
-            # Record step in history immediately (before executing actions)
-            # so partial progress survives timeout.
-            step_record = {
-                "model_output": {
-                    "current_state": {"thought": thought},
-                    "action": [{action_desc: ""}] if action_desc else [{"code": str(actions)}],
-                },
-                "result": [{"extracted_content": action_desc or str(actions)}],
-                "coordinates": [],
-            }
-            history.append(step_record)
+        if not all_actions:
+            return StepResult(actions=[], text=content)
 
-            # Convert coordinates and execute
-            actions = self._convert_relative_coords(actions)
-            for action in actions:
-                try:
-                    await self.execute_action(action)
-                except Exception as e:
-                    errors.append(f"Action error at step {step}: {e}")
+        # Check for termination
+        if any(a.get("type") == "terminate" for a in all_actions):
+            status = next(
+                (a["status"] for a in all_actions if a.get("type") == "terminate"),
+                "success",
+            )
+            return StepResult(
+                actions=[{"type": "terminate", "status": status}],
+                text=content,
+                is_done=True,
+            )
 
-            # Store for history replay
-            observations.append(screenshot)
-            cots.append({"thought": thought, "action": action_desc})
-
-            # Update step record with executed coordinates
-            step_record["coordinates"] = actions
-
-        return {
-            "steps": len(history),
-            "is_done": is_done,
-            "final_result": final_result,
-            "errors": errors,
-            "history": history,
-        }
+        # Filter out wait-only (not a real termination but not executable either)
+        return StepResult(actions=all_actions, text=content)
 
 
 # ---------------------------------------------------------------------------
 # Utilities
 # ---------------------------------------------------------------------------
-
-
-def _parse_args_simple(args_str: str) -> dict:
-    """Parse a Python function call's arguments into a dict.
-
-    Positional args get integer keys (0, 1, 2, ...).
-    Keyword args get string keys.
-    """
-    result: dict = {}
-    if not args_str.strip():
-        return result
-
-    # Split by commas, respecting strings and parens
-    parts = []
-    depth = 0
-    current = []
-    in_str = None
-    for ch in args_str:
-        if ch in ('"', "'") and not in_str:
-            in_str = ch
-        elif ch == in_str:
-            in_str = None
-        elif not in_str:
-            if ch == "(":
-                depth += 1
-            elif ch == ")":
-                depth -= 1
-            elif ch == "," and depth == 0:
-                parts.append("".join(current).strip())
-                current = []
-                continue
-        current.append(ch)
-    if current:
-        parts.append("".join(current).strip())
-
-    pos_idx = 0
-    for part in parts:
-        if "=" in part and not part.startswith(("'", '"')):
-            key, _, val = part.partition("=")
-            key = key.strip()
-            val = val.strip().strip("'\"")
-            try:
-                result[key] = float(val) if "." in val else int(val)
-            except ValueError:
-                result[key] = val
-        else:
-            val = part.strip().strip("'\"")
-            try:
-                result[pos_idx] = float(val) if "." in val else int(val)
-            except ValueError:
-                result[pos_idx] = val
-            pos_idx += 1
-
-    return result
-
-
-def _get_xy(parsed: dict) -> tuple[float, float]:
-    """Extract x, y from parsed args (positional or keyword)."""
-    x = parsed.get("x", parsed.get(0, 0))
-    y = parsed.get("y", parsed.get(1, 0))
-    return float(x), float(y)
 
 
 def _prune_image_messages(messages: list[dict], max_images: int) -> None:

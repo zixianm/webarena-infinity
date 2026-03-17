@@ -186,7 +186,7 @@ def _draw_action_overlay(image_bytes: bytes, actions: list[dict]) -> bytes:
                 label = "right-click"
             _draw_label(draw, x + 14, y - 10, label, CLICK_COLOR, LABEL_BG, font)
 
-        elif kind == "type" and x is not None and y is not None:
+        elif kind == "input" and x is not None and y is not None:
             # Crosshair at click target
             draw.line([(x - 12, y), (x + 12, y)], fill=TYPE_COLOR, width=2)
             draw.line([(x, y - 12), (x, y + 12)], fill=TYPE_COLOR, width=2)
@@ -197,7 +197,7 @@ def _draw_action_overlay(image_bytes: bytes, actions: list[dict]) -> bytes:
             label = f'type: "{display_text}"'
             _draw_label(draw, x + 10, y - 10, label, TYPE_COLOR, LABEL_BG, font)
 
-        elif kind == "type":
+        elif kind == "input":
             # Type without coordinates (just keyboard input)
             text = action.get("text", "")
             display_text = text[:30] + ("..." if len(text) > 30 else "")
@@ -308,43 +308,25 @@ def _build_details_html(run_dir: Path, r: dict) -> str:
     steps_html: list[str] = []
 
     for i, step in enumerate(step_entries):
-        model_output = step.get("model_output", {}) or {}
+        # Normalize: support both current {"thought", "actions"} format
+        # and legacy {"model_output": {...}, "result": [...], "coordinates": [...]}
+        if "model_output" in step:
+            mo = step.get("model_output", {}) or {}
+            cs = mo.get("current_state")
+            thought = str(cs.get("thought", "")) if isinstance(cs, dict) else ""
+            actions_list = step.get("coordinates") or []
+        else:
+            thought = str(step.get("thought", ""))
+            actions_list = step.get("actions") or []
 
-        # Thought
-        current_state = model_output.get("current_state")
-        thought = ""
-        if isinstance(current_state, dict):
-            thought = escape(str(current_state.get("thought", "")))
-
-        # Actions
-        actions = model_output.get("action", []) or []
-        if not isinstance(actions, list):
-            actions = [actions]
-        action_strs = []
-        for a in actions:
-            if isinstance(a, dict):
-                for k, v in a.items():
-                    action_strs.append(f"{k}: {escape(str(v))}")
-
-        # Results
-        result_entries = step.get("result", []) or []
-        if not isinstance(result_entries, list):
-            result_entries = [result_entries]
-        result_strs = []
-        for item in result_entries:
-            if isinstance(item, dict):
-                if item.get("extracted_content"):
-                    result_strs.append(escape(str(item["extracted_content"])))
-                if item.get("error"):
-                    result_strs.append(f"ERROR: {escape(str(item['error']))}")
+        thought_escaped = escape(thought)
+        action_strs = [escape(json.dumps(a)) for a in actions_list] if actions_list else []
 
         parts = [f"<div class='step'><strong>Step {i + 1}</strong>"]
-        if thought:
-            parts.append(f"<br><em>Thought:</em> {thought}")
+        if thought_escaped:
+            parts.append(f"<br><em>Thought:</em> {thought_escaped}")
         if action_strs:
             parts.append(f"<br><em>Actions:</em> {'; '.join(action_strs)}")
-        if result_strs:
-            parts.append(f"<br><em>Result:</em> {'; '.join(result_strs)}")
 
         # Embed screenshot as base64 inline image
         # If coordinate data is present, draw action overlays on the screenshot
@@ -352,10 +334,9 @@ def _build_details_html(run_dir: Path, r: dict) -> str:
         if ss_file.exists():
             image_bytes = ss_file.read_bytes()
 
-            # Draw coordinate overlay if vision agent data is present
-            coordinates = step.get("coordinates")
-            if coordinates and isinstance(coordinates, list):
-                image_bytes = _draw_action_overlay(image_bytes, coordinates)
+            # Draw coordinate overlay if action data is present
+            if actions_list and isinstance(actions_list, list):
+                image_bytes = _draw_action_overlay(image_bytes, actions_list)
 
             b64 = base64.b64encode(image_bytes).decode()
             parts.append(

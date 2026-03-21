@@ -288,7 +288,7 @@ We present summary statistics for the ten environments included in our initial r
 ## Performance of Browser-use Agents {#performance}
 <figure>
   <div style="max-width: 100%; margin: 0 auto;">
-    <img src="fig_main_bar_chart.png" alt="Real-task success rate by app and model">
+    <img src="figures/fig_main_bar_chart.png" alt="Real-task success rate by app and model">
   </div>
   <figcaption>Overall and breakdown success rate (%) of three browser-use agents </figcaption>
 </figure> 

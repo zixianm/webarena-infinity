@@ -4,6 +4,11 @@
   /* ── Styles ── */
   var style = document.createElement("style");
   style.textContent = `
+    #tp-wrapper {
+      position: fixed; top: 0; left: 0; width: 0; height: 0;
+      overflow: visible; z-index: 999998;
+      pointer-events: none;
+    }
     #tp-root {
       position: fixed; top: 0; right: 0; bottom: 0;
       width: 380px; z-index: 999999;
@@ -13,15 +18,16 @@
       background: #fff; border-left: 1px solid #d0d0d0;
       box-shadow: -2px 0 12px rgba(0,0,0,.08);
       transition: transform .2s ease;
+      pointer-events: auto;
     }
     #tp-root.tp-collapsed { transform: translateX(100%); }
-    body.tp-panel-open { margin-right: 380px !important; transition: margin-right .2s ease; }
     #tp-root *, #tp-root *::before, #tp-root *::after {
       box-sizing: border-box;
     }
 
     #tp-toggle {
-      position: fixed; top: 12px; right: 12px; z-index: 999998;
+      position: fixed; top: 12px; right: 12px; z-index: 1000000;
+      pointer-events: auto;
       padding: 6px 12px; border-radius: 6px;
       background: #2563eb; color: #fff; border: none;
       font-size: 12px; font-weight: 600; cursor: pointer;
@@ -122,11 +128,16 @@
   }
 
   /* ── DOM ── */
+  // Wrapper keeps panel out of body's grid/flex layout
+  var wrapper = document.createElement("div");
+  wrapper.id = "tp-wrapper";
+  document.body.appendChild(wrapper);
+
   var toggle = document.createElement("button");
   toggle.id = "tp-toggle";
   toggle.textContent = "Test Panel";
   toggle.className = "tp-panel-open";
-  document.body.appendChild(toggle);
+  wrapper.appendChild(toggle);
 
   var root = document.createElement("div");
   root.id = "tp-root";
@@ -141,10 +152,9 @@
     '<div id="tp-list"></div>',
     '<div id="tp-detail"><span id="tp-detail-empty">Select a task above</span></div>',
   ].join("");
-  document.body.appendChild(root);
+  wrapper.appendChild(root);
 
   var panelOpen = true;
-  document.body.classList.add("tp-panel-open");
   toggle.addEventListener("click", function () {
     panelOpen = !panelOpen;
     root.classList.toggle("tp-collapsed", !panelOpen);

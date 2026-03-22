@@ -58,7 +58,11 @@ echo "  Poll interval:      ${POLL_INTERVAL}s"
 echo "  Extra launch args:  ${LAUNCH_ARGS[*]:-none}"
 echo ""
 
-REGION="${AWS_REGION:-us-east-1}"
+# --- Load central config ---
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/../config.sh"
+
+REGION="$MM_REGION"
 KEY_PAIR="${KEY_PAIR_NAME:-}"
 
 SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -o BatchMode=yes"

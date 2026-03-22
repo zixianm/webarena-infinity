@@ -1,0 +1,75 @@
+{
+  "_comment": "Task IDs to show in demo mode per app. Edit to customize the subset.",
+  "elation-clinical-records": [
+    "task_e1",
+    "task_e2"
+  ],
+  "elation-patient-communication": [
+    "task_e1",
+    "task_e2"
+  ],
+  "elation-prescriptions": [
+    "task_e1",
+    "task_e2"
+  ],
+  "figma-slides": [
+    "task_e1",
+    "task_e2"
+  ],
+  "figma-text-and-typography": [
+    "task_e1",
+    "task_e2"
+  ],
+  "gitlab-plan-and-track": [
+    "task_e1",
+    "task_e2"
+  ],
+  "gmail": [
+    "task_e1",
+    "task_e2"
+  ],
+  "gmail-accounts-and-contacts": [
+    "task_e1",
+    "task_e2"
+  ],
+  "handshake-career-exploration": [
+    "task_e1",
+    "task_e2"
+  ],
+  "linear-account-settings": [
+    "task_e1",
+    "task_e2"
+  ],
+  "paypal-my-wallet": [
+    "task_e1",
+    "task_e2"
+  ],
+  "superhuman-general": [
+    "task_e1",
+    "task_e2"
+  ],
+  "xero-invoicing": [
+    "task_e1",
+    "task_e2"
+  ],
+  "ablations/elation-prescriptions-nodocs": [
+    "task_e1",
+    "task_e2"
+  ],
+  "ablations/figma-slides-nodocs": [
+    "task_e1",
+    "task_e2"
+  ],
+  "ablations/gitlab-plan-and-track-nodocs": [
+    "task_e1",
+    "task_e2"
+  ],
+  "ablations/gmail-accounts-and-contacts-nodocs": [
+    "task_e1",
+    "task_e2"
+  ],
+  "ablations/xero-invoicing-nodocs": [
+    "task_e1",
+    "task_e2"
+  ]
+}

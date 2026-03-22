@@ -1,5 +1,5 @@
 ---
-title: "WebArena-Infinity: Scaling Verifiable Browser Environment Generation to Any Domain"
+title: "WebArena-Infinity: Generating Browser Environments with Verifiable Tasks at Scale"
 author: Shuyan Zhou
 affiliation: Duke University
 contact: {shuyanzhdot@gmail.com}
@@ -37,7 +37,7 @@ In this initial release, we provide ten environments along with 1,260 verifiable
 ## Self Auditing and Self Challenging Environment and Verifiable Task Generation {#approach} [toc: Approach]
 <figure class="wide">
   <div style="max-width: 80%; margin: 0 auto;">
-    <img src="pipeline.svg" alt="Pipeline overview">
+    <img src="figures/pipeline.svg" alt="Pipeline overview">
   </div>
   <figcaption>Overview of our approach</figcaption>
 </figure>

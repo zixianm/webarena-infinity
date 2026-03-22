@@ -3,7 +3,7 @@
 #
 # Creates an S3 bucket with static website hosting enabled and a public-read
 # policy so report.html files are directly browsable.  Also attaches an inline
-# IAM policy to the mirror-mirror-ec2 role so EC2 instances can upload.
+# IAM policy to the MM_IAM_ROLE so EC2 instances can upload.
 #
 # Usage:
 #   bash infra/setup/setup_s3.sh
@@ -11,10 +11,14 @@
 
 set -euo pipefail
 
+# --- Load central config ---
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+source "$REPO_ROOT/infra/config.sh"
+
 # --- Defaults ---
-BUCKET="${MM_S3_BUCKET:-mirror-mirror-results}"
-REGION="${AWS_REGION:-us-east-1}"
-ROLE_NAME="mirror-mirror-ec2"
+BUCKET="$MM_S3_BUCKET"
+REGION="$MM_REGION"
+ROLE_NAME="$MM_IAM_ROLE"
 
 # --- Parse arguments ---
 while [[ $# -gt 0 ]]; do

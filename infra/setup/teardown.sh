@@ -13,7 +13,11 @@
 
 set -euo pipefail
 
-REGION="${AWS_REGION:-us-east-1}"
+# --- Load central config ---
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+source "$REPO_ROOT/infra/config.sh"
+
+REGION="$MM_REGION"
 RELEASE_EIPS=false
 DELETE_ALL=false
 TERMINATE=false
@@ -35,7 +39,7 @@ else
 fi
 
 INSTANCE_IDS=$(aws ec2 describe-instances \
-  --filters "Name=tag:Project,Values=mirror-mirror" "Name=instance-state-name,Values=pending,running,stopping,stopped" \
+  --filters "Name=tag:Project,Values=${MM_PROJECT_TAG}" "Name=instance-state-name,Values=pending,running,stopping,stopped" \
   --query 'Reservations[].Instances[].InstanceId' \
   --output text --region "$REGION")
 
@@ -77,7 +81,7 @@ fi
 # --- Disassociate Elastic IPs (return to pool) ---
 echo ""
 EIP_JSON=$(aws ec2 describe-addresses \
-  --filters "Name=tag:Project,Values=mirror-mirror" \
+  --filters "Name=tag:Project,Values=${MM_PROJECT_TAG}" \
   --query 'Addresses[].[AllocationId,PublicIp,AssociationId]' \
   --output json --region "$REGION" 2>/dev/null || echo "[]")
 EIP_COUNT=$(echo "$EIP_JSON" | python3 -c "import sys,json; print(len(json.load(sys.stdin)))")
@@ -116,18 +120,18 @@ if $DELETE_ALL; then
   echo ""
   echo "=== Deleting security group ==="
   SG_ID=$(aws ec2 describe-security-groups \
-    --filters "Name=group-name,Values=mm-pipeline" \
+    --filters "Name=group-name,Values=$MM_SECURITY_GROUP" \
     --query 'SecurityGroups[0].GroupId' --output text --region "$REGION" 2>/dev/null || true)
   if [ -n "$SG_ID" ] && [ "$SG_ID" != "None" ]; then
     aws ec2 delete-security-group --group-id "$SG_ID" --region "$REGION" 2>/dev/null && \
       echo "  Deleted: $SG_ID" || echo "  Failed (may have dependencies): $SG_ID"
   else
-    echo "  No mm-pipeline security group found."
+    echo "  No $MM_SECURITY_GROUP security group found."
   fi
 
   echo ""
   echo "=== Deleting IAM role ==="
-  ROLE_NAME="mirror-mirror-ec2"
+  ROLE_NAME="$MM_IAM_ROLE"
   aws iam remove-role-from-instance-profile --instance-profile-name "$ROLE_NAME" --role-name "$ROLE_NAME" 2>/dev/null || true
   aws iam delete-instance-profile --instance-profile-name "$ROLE_NAME" 2>/dev/null || true
   aws iam detach-role-policy --role-name "$ROLE_NAME" --policy-arn arn:aws:iam::aws:policy/AmazonSQSFullAccess 2>/dev/null || true

@@ -17,15 +17,30 @@ from pathlib import Path
 _PANEL_JS_PATH = os.path.join(os.path.dirname(__file__), "test_panel.js")
 
 
-def patch_handler_for_test_mode(handler_class, app_dir):
-    """Monkey-patch *handler_class* to serve the test panel and verifier API."""
+def patch_handler_for_test_mode(handler_class, app_dir, allowed_task_ids=None):
+    """Monkey-patch *handler_class* to serve the test panel and verifier API.
+
+    If *allowed_task_ids* is a list, only those tasks are exposed via
+    ``GET /api/tasks`` and ``POST /api/verify``.  The env var
+    ``MM_DEMO_TASKS`` (comma-separated IDs) is also checked as a fallback.
+    """
 
     app_dir = str(Path(app_dir).resolve())
     tasks_json_path = os.path.join(app_dir, "real-tasks.json")
 
-    # Cache real-tasks.json contents
+    # Resolve task filter: explicit arg > env var > all tasks
+    if not allowed_task_ids:
+        env_ids = os.environ.get("MM_DEMO_TASKS", "")
+        if env_ids:
+            allowed_task_ids = [t.strip() for t in env_ids.split(",") if t.strip()]
+
+    # Cache real-tasks.json contents (filtered if subset specified)
     with open(tasks_json_path) as f:
-        tasks_payload = f.read().encode()
+        all_tasks = json.load(f)
+    if allowed_task_ids:
+        allowed_set = set(allowed_task_ids)
+        all_tasks = [t for t in all_tasks if t["id"] in allowed_set]
+    tasks_payload = json.dumps(all_tasks).encode()
 
     # Cache panel JS contents
     with open(_PANEL_JS_PATH) as f:
@@ -75,10 +90,8 @@ def patch_handler_for_test_mode(handler_class, app_dir):
             body = json.loads(self.rfile.read(content_length))
             task_id = body.get("task_id", "")
 
-            # Find the task's verify script
-            with open(tasks_json_path) as f:
-                tasks = json.load(f)
-            task = next((t for t in tasks if t["id"] == task_id), None)
+            # Find the task's verify script (use cached filtered list)
+            task = next((t for t in all_tasks if t["id"] == task_id), None)
             if not task:
                 self._send_json(400, {"error": f"Unknown task: {task_id}"})
                 return

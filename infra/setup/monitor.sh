@@ -56,7 +56,10 @@ for lf in "${LAUNCH_FILES[@]}"; do
 done
 INSTANCE_IDS="$ALL_INSTANCE_IDS"
 KEY_PAIR="${KEY_PAIR:-${KEY_PAIR_NAME:-}}"
-REGION="${REGION:-${AWS_REGION:-us-east-1}}"
+# Load central config for region default
+_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$_SCRIPT_DIR/../config.sh"
+REGION="${REGION:-$MM_REGION}"
 
 if [ -z "$KEY_PAIR" ]; then
   echo "ERROR: KEY_PAIR not set (check launch files or set KEY_PAIR_NAME)"

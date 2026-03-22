@@ -12,10 +12,14 @@
 
 set -euo pipefail
 
+# --- Load central config ---
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+source "$REPO_ROOT/infra/config.sh"
+
 # --- Defaults ---
-INSTANCE_TYPE="m5.4xlarge"
+INSTANCE_TYPE="$MM_INSTANCE_TYPE"
 KEY_PAIR="${KEY_PAIR_NAME:-}"
-REGION="${AWS_REGION:-us-east-1}"
+REGION="$MM_REGION"
 SG_ID=""
 SUBNET_ID=""
 AMI_NAME_PREFIX="mm-base"
@@ -65,12 +69,12 @@ if [ -z "$SG_ID" ]; then
     exit 1
   fi
   SG_ID=$(aws ec2 describe-security-groups \
-    --filters "Name=group-name,Values=mm-pipeline" "Name=vpc-id,Values=$VPC_ID" \
+    --filters "Name=group-name,Values=$MM_SECURITY_GROUP" "Name=vpc-id,Values=$VPC_ID" \
     --query 'SecurityGroups[0].GroupId' --output text --region "$REGION" 2>/dev/null || true)
   if [ -z "$SG_ID" ] || [ "$SG_ID" = "None" ]; then
-    echo "Creating security group: mm-pipeline"
+    echo "Creating security group: $MM_SECURITY_GROUP"
     SG_ID=$(aws ec2 create-security-group \
-      --group-name mm-pipeline \
+      --group-name "$MM_SECURITY_GROUP" \
       --description "Mirror-Mirror pipeline (SSH only)" \
       --vpc-id "$VPC_ID" \
       --query 'GroupId' --output text --region "$REGION")
@@ -164,7 +168,7 @@ INST_ID=$(aws ec2 run-instances \
   --associate-public-ip-address \
   --block-device-mappings '[{"DeviceName":"/dev/xvda","Ebs":{"VolumeSize":50}}]' \
   --user-data "$USERDATA" \
-  --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=mm-base-template},{Key=Project,Value=mirror-mirror},{Key=Role,Value=base-template}]" \
+  --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=mm-base-template},{Key=Project,Value=${MM_PROJECT_TAG}},{Key=Role,Value=base-template}]" \
   --query 'Instances[0].InstanceId' --output text --region "$REGION")
 
 echo "  Instance: $INST_ID"
@@ -269,7 +273,7 @@ AMI_ID=$(aws ec2 create-image \
   --instance-id "$INST_ID" \
   --name "$AMI_NAME" \
   --description "Mirror-Mirror base image with Claude CLI, Playwright, Python 3.12, Node 20" \
-  --tag-specifications "ResourceType=image,Tags=[{Key=Name,Value=${AMI_NAME}},{Key=Project,Value=mirror-mirror}]" \
+  --tag-specifications "ResourceType=image,Tags=[{Key=Name,Value=${AMI_NAME}},{Key=Project,Value=${MM_PROJECT_TAG}}]" \
   --query 'ImageId' --output text --region "$REGION")
 
 echo "  AMI ID: $AMI_ID"

@@ -7,6 +7,7 @@
 # Prerequisites:
 #   Set these env vars (or source .env):
 #     GITHUB_TOKEN       — for git clone/push on EC2 instances
+#     GITHUB_REPO        — GitHub owner/repo (e.g. myuser/mirror-mirror)
 #     KEY_PAIR_NAME      — your EC2 key pair name
 #     GOOGLE_API_KEY     — for Gemini eval agent (optional if using --model gpt)
 #     OPENAI_API_KEY     — for GPT eval agent (optional if using --model gemini-flash/gemini-pro)
@@ -19,19 +20,20 @@
 
 set -euo pipefail
 
-# --- Load .env if present ---
+# --- Load .env and central config ---
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 set -a && source "$REPO_ROOT/.env" && set +a
+source "$REPO_ROOT/infra/config.sh"
 
 # --- Defaults ---
 MANIFEST="infra/env_manifest.jsonl"
-INSTANCE_TYPE="m5.4xlarge"
+INSTANCE_TYPE="$MM_INSTANCE_TYPE"
 KEY_PAIR="${KEY_PAIR_NAME:-}"
 MODEL="gemini-flash"
 WORKERS="8"
 REPETITIONS="3"
 MAX_ITERATIONS="3"
-REGION="${AWS_REGION:-us-east-1}"
+REGION="$MM_REGION"
 SG_ID=""
 SUBNET_ID=""
 CUSTOM_AMI=""
@@ -61,13 +63,14 @@ while [[ $# -gt 0 ]]; do
 done
 
 # --- Validate ---
-for var in GITHUB_TOKEN KEY_PAIR; do
+for var in GITHUB_TOKEN GITHUB_REPO KEY_PAIR; do
   val="${!var:-}"
   if [ -z "$val" ]; then
     echo "ERROR: $var is not set."
     echo ""
     echo "Required env vars:"
     echo "  GITHUB_TOKEN     — for git clone/push"
+    echo "  GITHUB_REPO      — GitHub owner/repo (e.g. myuser/mirror-mirror)"
     echo "  KEY_PAIR_NAME    — EC2 key pair (or pass --key-pair)"
     echo ""
     echo "Optional (depending on --model):"
@@ -131,13 +134,13 @@ if [ -z "$SG_ID" ]; then
 
   # Check if security group already exists
   SG_ID=$(aws ec2 describe-security-groups \
-    --filters "Name=group-name,Values=mm-pipeline" "Name=vpc-id,Values=$VPC_ID" \
+    --filters "Name=group-name,Values=$MM_SECURITY_GROUP" "Name=vpc-id,Values=$VPC_ID" \
     --query 'SecurityGroups[0].GroupId' --output text --region "$REGION" 2>/dev/null || true)
 
   if [ -z "$SG_ID" ] || [ "$SG_ID" = "None" ]; then
-    echo "Creating security group: mm-pipeline"
+    echo "Creating security group: $MM_SECURITY_GROUP"
     SG_ID=$(aws ec2 create-security-group \
-      --group-name mm-pipeline \
+      --group-name "$MM_SECURITY_GROUP" \
       --description "Mirror-Mirror pipeline (SSH only)" \
       --vpc-id "$VPC_ID" \
       --query 'GroupId' --output text --region "$REGION")
@@ -178,7 +181,7 @@ for entry in "${ENVS[@]}"; do
 done
 
 # --- IAM role (create if needed) ---
-ROLE_NAME="mirror-mirror-ec2"
+ROLE_NAME="$MM_IAM_ROLE"
 PROFILE_EXISTS=$(aws iam get-instance-profile --instance-profile-name "$ROLE_NAME" \
   --query 'InstanceProfile.InstanceProfileName' --output text 2>/dev/null || true)
 
@@ -197,7 +200,7 @@ if [ -z "$PROFILE_EXISTS" ] || [ "$PROFILE_EXISTS" = "None" ]; then
 fi
 
 # --- Attach S3 results upload policy to EC2 role ---
-S3_BUCKET="${MM_S3_BUCKET:-mirror-mirror-results}"
+S3_BUCKET="$MM_S3_BUCKET"
 echo "Attaching S3 results policy to $ROLE_NAME (bucket: $S3_BUCKET)"
 aws iam put-role-policy \
   --role-name "$ROLE_NAME" \
@@ -222,7 +225,7 @@ build_env_setup() {
 
 # Clone repo and checkout branch (retry up to 3 times for transient network errors)
 for attempt in 1 2 3; do
-  su - ec2-user -c 'git clone --branch ${env_id} https://${GITHUB_TOKEN}@github.com/shuyanzhou/mirror-mirror.git /home/ec2-user/mirror-mirror' && break
+  su - ec2-user -c 'git clone --branch ${env_id} https://${GITHUB_TOKEN}@github.com/${GITHUB_REPO}.git /home/ec2-user/mirror-mirror' && break
   echo "Clone attempt \$attempt failed, retrying in 10s..."
   rm -rf /home/ec2-user/mirror-mirror
   sleep 10
@@ -425,7 +428,7 @@ for entry in "${ENVS[@]}"; do
     --iam-instance-profile Name="$ROLE_NAME" \
     --block-device-mappings '[{"DeviceName":"/dev/xvda","Ebs":{"VolumeSize":50}}]' \
     --user-data "$(build_userdata "$env_id" "$docs_path" | maybe_base64)" \
-    --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=mm-pipeline-${env_id}},{Key=Project,Value=mirror-mirror},{Key=Role,Value=pipeline},{Key=EnvId,Value=${env_id}}]" \
+    --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=mm-pipeline-${env_id}},{Key=Project,Value=${MM_PROJECT_TAG}},{Key=Role,Value=pipeline},{Key=EnvId,Value=${env_id}}]" \
     --query 'Instances[0].InstanceId' --output text --region "$REGION")
 
   echo "  $env_id → $INST_ID"
@@ -442,7 +445,7 @@ done
 
 # Build list of unassociated pool EIPs (tagged Project=mirror-mirror, not attached)
 POOL_EIPS=$(aws ec2 describe-addresses \
-  --filters "Name=tag:Project,Values=mirror-mirror" \
+  --filters "Name=tag:Project,Values=${MM_PROJECT_TAG}" \
   --query 'Addresses[?AssociationId==null].AllocationId' \
   --output text --region "$REGION" 2>/dev/null || true)
 POOL_ARRAY=($POOL_EIPS)
@@ -464,7 +467,7 @@ for INST_ID in $INSTANCE_IDS; do
   else
     # Pool exhausted — allocate a new EIP
     EIP_JSON=$(aws ec2 allocate-address --domain vpc \
-      --tag-specifications "ResourceType=elastic-ip,Tags=[{Key=Name,Value=mm-eip-${ENV_ID}},{Key=Project,Value=mirror-mirror}]" \
+      --tag-specifications "ResourceType=elastic-ip,Tags=[{Key=Name,Value=mm-eip-${ENV_ID}},{Key=Project,Value=${MM_PROJECT_TAG}}]" \
       --region "$REGION")
     ALLOC_ID=$(echo "$EIP_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin)['AllocationId'])")
     EIP=$(echo "$EIP_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin)['PublicIp'])")

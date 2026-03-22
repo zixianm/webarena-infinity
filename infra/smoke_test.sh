@@ -7,8 +7,12 @@
 
 set -uo pipefail
 
+# --- Load central config ---
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$REPO_ROOT/infra/config.sh"
+
 MODEL="gemini"
-S3_BUCKET="${MM_S3_BUCKET:-mirror-mirror-results}"
+S3_BUCKET="$MM_S3_BUCKET"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
